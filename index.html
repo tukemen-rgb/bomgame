@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>BLAST RUSH — 爽快爆弾アクション</title>
+<link rel="stylesheet" href="css/style.css">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>💣</text></svg>">
+</head>
+<body>
+<div id="app">
+
+  <header id="hud">
+    <div class="hud-cell"><span class="hud-label">SCORE</span><span id="hud-score" class="hud-value">0</span></div>
+    <div class="hud-cell"><span class="hud-label">STAGE</span><span id="hud-stage" class="hud-value">1</span></div>
+    <div class="hud-cell"><span class="hud-label">TIME</span><span id="hud-time" class="hud-value">200</span></div>
+    <div class="hud-cell"><span class="hud-label">LIFE</span><span id="hud-life" class="hud-value">♥♥♥</span></div>
+    <div class="hud-cell hud-grow"><span class="hud-label">POWER</span><span id="hud-power" class="hud-value hud-small">💣1 🔥1</span></div>
+  </header>
+
+  <div id="stage-wrap">
+    <canvas id="game" width="600" height="520"></canvas>
+
+    <div id="overlay" class="overlay">
+      <div class="panel" id="panel"></div>
+    </div>
+
+    <div id="combo-banner"></div>
+  </div>
+
+  <div id="touch" aria-hidden="true">
+    <div class="pad">
+      <button class="tbtn" data-key="ArrowUp">▲</button>
+      <div class="pad-row">
+        <button class="tbtn" data-key="ArrowLeft">◀</button>
+        <button class="tbtn" data-key="ArrowDown">▼</button>
+        <button class="tbtn" data-key="ArrowRight">▶</button>
+      </div>
+    </div>
+    <div class="acts">
+      <button class="tbtn big" data-key=" ">💣</button>
+      <button class="tbtn" data-key="Enter">起爆</button>
+    </div>
+  </div>
+
+  <footer id="legend">
+    <span><b>1P</b> ←↑↓→ 移動 / <b>Space</b> 爆弾 / <b>Enter</b> 起爆</span>
+    <span><b>2P</b> WASD 移動 / <b>F</b> 爆弾 / <b>G</b> 起爆</span>
+    <span><b>P</b> ポーズ / <b>M</b> 音楽 / <b>N</b> 効果音</span>
+  </footer>
+
+</div>
+
+<script src="js/const.js"></script>
+<script src="js/audio.js"></script>
+<script src="js/fx.js"></script>
+<script src="js/map.js"></script>
+<script src="js/entities.js"></script>
+<script src="js/game.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>

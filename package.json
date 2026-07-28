@@ -1,0 +1,13 @@
+{
+  "name": "blast-rush",
+  "version": "1.0.0",
+  "description": "ボンバーマンを参考にした爽快系の爆弾アクション。依存なしの HTML5 Canvas ゲーム。",
+  "private": true,
+  "scripts": {
+    "start": "python3 -m http.server 8901",
+    "test": "node test/smoke.js"
+  },
+  "devDependencies": {
+    "playwright": "^1.62.0"
+  }
+}
