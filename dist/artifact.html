@@ -1859,6 +1859,16 @@ BM.DIRS = [
     return true;
   };
 
+  /* エンティティの当たり判定の箱が、指定マスに少しでも重なっているか。
+     「置いた爆弾をすり抜けられる」判定はこれで解除する。中心セルで判定すると、
+     中心が隣に移った瞬間に解除されて、箱の後ろ半分が爆弾のマスに残ったまま
+     前にも後ろにも進めなくなる。 */
+  Game.prototype.overlapsCell = function (ent, cx, cy) {
+    var r = ent.radius;
+    return ent.x + r > cx * TILE && ent.x - r < (cx + 1) * TILE &&
+           ent.y + r > cy * TILE && ent.y - r < (cy + 1) * TILE;
+  };
+
   Game.prototype.nearestPlayer = function (x, y) {
     var best = null, bd = 1e9;
     for (var i = 0; i < this.players.length; i++) {
@@ -2162,7 +2172,7 @@ BM.DIRS = [
       for (var idKey in b.pass) {
         var ent = this.findEntity(Number(idKey));
         if (!ent || !ent.alive) { delete b.pass[idKey]; continue; }
-        if (BM.cellOf(ent.x) !== b.cx || BM.cellOf(ent.y) !== b.cy) delete b.pass[idKey];
+        if (!this.overlapsCell(ent, b.cx, b.cy)) delete b.pass[idKey];
       }
       if (b.update(dt, this)) {
         this.explode(b);

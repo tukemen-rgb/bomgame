@@ -83,6 +83,46 @@ function chromiumPath() {
     await page.evaluate(() => BM.game.myRatio < BM.game.targetRatio && !BM.game.door.open));
   check('スタート地点が自陣として塗られている', await page.evaluate(() => BM.game.map.inkAt(1, 1) === 1));
 
+  // ---- 回帰: 爆弾を置いた直後にそのマスから動けなくなる不具合 ----
+  // すり抜け許可を「中心セルが変わったら解除」にすると、当たり判定の箱の後ろ半分が
+  // 爆弾のマスに残ったまま解除され、前にも後ろにも進めなくなる。
+  const CROSS = (cx, cy) => page.evaluate(({ cx, cy }) => {
+    const g = BM.game, p = g.players[0];
+    p.invuln = 9999; p.activeBombs = 0; p.bombCooldown = 0; g.bombs.length = 0;
+    for (let d = -3; d <= 3; d++) { g.map.set(cx + d, cy, BM.T_EMPTY); g.map.set(cx, cy + d, BM.T_EMPTY); }
+    p.x = BM.centerOf(cx); p.y = BM.centerOf(cy);
+    return { x: p.x, y: p.y };
+  }, { cx, cy });
+
+  for (const [key, axis, sign] of [
+    ['ArrowRight', 'x', 1], ['ArrowLeft', 'x', -1],
+    ['ArrowDown', 'y', 1], ['ArrowUp', 'y', -1]
+  ]) {
+    const start = await CROSS(7, 5);
+    await page.keyboard.press(' ');
+    await page.waitForTimeout(80);
+    await page.keyboard.down(key);
+    await page.waitForTimeout(700);
+    await page.keyboard.up(key);
+    const now = await page.evaluate(a => BM.game.players[0][a], axis);
+    const moved = (now - start[axis]) * sign;
+    check(`爆弾を置いた直後に ${key} で逃げられる（${moved.toFixed(0)}px 移動）`, moved > 60);
+  }
+
+  // 離れたあとの爆弾はちゃんと壁として働く（すり抜けっぱなしにならない）
+  await CROSS(7, 5);
+  await page.keyboard.press(' ');
+  await page.waitForTimeout(80);
+  await page.keyboard.down('ArrowRight');
+  await page.waitForTimeout(700);
+  await page.keyboard.up('ArrowRight');
+  await page.keyboard.down('ArrowLeft');
+  await page.waitForTimeout(900);
+  await page.keyboard.up('ArrowLeft');
+  const blocked = await page.evaluate(() => BM.cellOf(BM.game.players[0].x));
+  check('離れたあとは自分の爆弾に戻れない', blocked > 7);
+  await page.evaluate(() => { BM.game.bombs.length = 0; BM.game.players[0].activeBombs = 0; });
+
   // ---- 実際にキー入力で歩いて爆弾を置く ----
   await page.evaluate(() => {
     const p = BM.game.players[0];
