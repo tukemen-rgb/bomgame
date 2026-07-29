@@ -38,15 +38,17 @@ body{
 /* ---------- HUD ---------- */
 #hud{
   display:flex;
-  gap:12px;
+  gap:10px;
   background:linear-gradient(180deg,#1d1430,#130d20);
   border:1px solid var(--line);
   border-radius:12px;
   padding:8px 10px;
   box-shadow:0 6px 24px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.06);
 }
-.hud-cell{display:flex;flex-direction:column;gap:2px;min-width:66px;white-space:nowrap}
-.hud-depth{min-width:88px}
+.hud-cell{display:flex;flex-direction:column;gap:2px;min-width:58px;white-space:nowrap;flex-shrink:0}
+.hud-depth{min-width:86px}
+/* 観戦モードの早送りでスコアが7桁まで伸びるので、その幅を確保しておく */
+.hud-score-cell{min-width:100px}
 .hud-depth .hud-value{font-size:24px;color:#ffd23d}
 .hud-depth small{font-size:12px;opacity:.7;margin-left:1px}
 .hud-grow{flex:1;align-items:flex-end;min-width:0}

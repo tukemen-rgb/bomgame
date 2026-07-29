@@ -127,6 +127,7 @@
         '<div class="menu">' +
         '<button data-act="play">▶ 落ちる</button>' +
         '<button data-act="how">📖 あそびかた</button>' +
+        '<button data-act="watch">👁 観戦モード<small>自動操縦で勝手に潜る。操作不要・墜落なし</small></button>' +
         '</div>' +
         '<div class="tips">最高到達 <b>' + g.bestDepth + 'm</b> ／ ハイスコア <b>' +
         g.bestScore.toLocaleString('en-US') + '</b></div>'
@@ -166,7 +167,8 @@
         '<button data-act="title">◀ タイトルへ</button>' +
         '</div>' +
         '<div class="tips">音楽 <code>M</code> ／ 効果音 <code>N</code><br>' +
-        '構造確認モード（無敵で最後まで通す） <code>I</code></div>'
+        '観戦モード（自動操縦＋無敵） <code>O</code> ／ 早送り <code>T</code><br>' +
+        '無敵だけ（操作は自分で） <code>I</code></div>'
       );
     },
 
@@ -197,6 +199,8 @@
     BM.sound.init();
     switch (name) {
       case 'play':
+        // 通常プレイに戻る。無敵（?inspect=1 や I キー）はそのまま尊重する
+        BM.autopilot.enabled = false;
         ui.reset();
         game.newRun();
         ui.hide();
@@ -211,6 +215,14 @@
         game.stateT = 0;
         BM.sound.stopMusic();
         ui.showTitle(game);
+        break;
+      case 'watch':
+        BM.autopilot.enabled = true;
+        ui.reset();
+        game.newRun();
+        game.noDeath = true;
+        ui.hide();
+        BM.sound.startMusic();
         break;
       case 'how': ui.showHow(); break;
       case 'back': ui.showTitle(game); break;
@@ -233,9 +245,25 @@
       return;
     }
     if (k === 'n') { BM.sound.sfxOn = !BM.sound.sfxOn; return; }
-    if (k === 'i') {   // 構造確認モード（無敵で最後まで通す）
+    if (k === 'i') {   // 構造確認モード（無敵。操作は自分でする）
       game.noDeath = !game.noDeath;
+      if (!game.noDeath) BM.autopilot.enabled = false;
       ui.banner(game.noDeath ? '構造確認モード ON（無敵）' : '構造確認モード OFF');
+      return;
+    }
+    if (k === 'o') {   // 観戦モード。ゲームが自分で潜っていくのを眺めるだけ
+      var on = !BM.autopilot.enabled;
+      BM.autopilot.enabled = on;
+      game.noDeath = on;
+      BM.input.keys['ArrowLeft'] = BM.input.keys['ArrowRight'] = false;
+      ui.banner(on ? '観戦モード ON（自動操縦・無敵）' : '観戦モード OFF');
+      if (on && game.state === BM.S_TITLE) act('play');
+      return;
+    }
+    if (k === 't') {   // 観戦を早送りする（物理はそのまま、更新回数を増やす）
+      var steps = [1, 2, 4, 8];
+      game.speedMul = steps[(steps.indexOf(game.speedMul) + 1) % steps.length];
+      ui.banner('速度 ×' + game.speedMul);
       return;
     }
 
@@ -260,9 +288,19 @@
   function frame(now) {
     var dt = last ? Math.min(0.05, (now - last) / 1000) : 0.016;
     last = now;
-    game.update(dt);
+
+    // 早送りは dt を伸ばすのではなく、細かい固定刻みで何回も更新する。
+    // dt を伸ばすと当たり判定と操作の反応が粗くなり、挙動そのものが変わる
+    // （早送りにしただけで自動操縦が下手になり、詰まりが増えてしまった）。
+    var mul = game.state === BM.S_PLAY ? (game.speedMul || 1) : 1;
+    var target = dt * mul;
+    var n = Math.min(96, Math.max(1, Math.ceil(target / (1 / 120))));
+    var step = target / n;
+    for (var s = 0; s < n; s++) {
+      game.update(step);
+      input.endFrame();   // 1回の押下が複数回の更新で効かないようにする
+    }
     game.render();
-    input.endFrame();
     requestAnimationFrame(frame);
   }
 
@@ -271,8 +309,16 @@
     bindTouch();
     game = new BM.Game(document.getElementById('game'));
     BM.game = game;
-    // ?inspect=1 で、死なずに構造を最後まで見られるモードで起動する
+    // ?inspect=1 … 無敵（操作は自分でする）
+    // ?watch=1   … 観戦モード（自動操縦＋無敵）。そのまま落ち始める
     if (/[?&]inspect=1/.test(location.search)) game.noDeath = true;
+    if (/[?&]watch=1/.test(location.search)) {
+      BM.autopilot.enabled = true;
+      game.noDeath = true;
+      var sp = /[?&]speed=(\d+)/.exec(location.search);
+      if (sp) game.speedMul = BM.clamp(parseInt(sp[1], 10) || 1, 1, 8);
+      setTimeout(function () { act('watch'); }, 60);
+    }
     ui.showTitle(game);
     requestAnimationFrame(frame);
   });

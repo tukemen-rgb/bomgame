@@ -104,12 +104,11 @@
         { col: L, row: y, side: -1, hit: false, t: 0 },
         { col: R, row: y, side: 1, hit: false, t: 0 }
       ];
-      // 穴はボタンの真下ではなく、決まった1箇所に開ける。
-      // 壁側に開けると出口が「左端か右端」の二択になり、次の層は
-      // その両方から届く位置に置く必要が出て、落差が画面1枚を超えてしまう。
-      // 中央寄りの1点に固定すれば、どちらのボタンを押しても出口は同じ。
-      // 穴は縦坑の中央に固定する。壁寄りに置くと、反対の壁のボタンから
-      // 横断する距離が最大10マスになり、確保した落差では届かなくなる。
+      // 穴はボタンの真下ではなく、縦坑の中央に固定して開ける。
+      // 壁側に開けると出口が「左端か右端」の二択になり、次の層はその両方から
+      // 届く位置に置く必要が出て、落差が画面1枚を超えてしまう。
+      // また中央以外に置くと、反対の壁のボタンからの横断距離が最大10マスになり、
+      // 確保した落差では届かない。1点に固定すればどちらを押しても出口は同じ。
       layer.holeCol = Math.round((L + R) / 2);
       layer.hint = 'ボタン';
       layer.exit = [layer.holeCol - 1, layer.holeCol + 1];
@@ -174,7 +173,9 @@
       layer.mid = BM.clamp(Math.round(layer.gapX), L + 2, R - 2);
       layer.sep = 2.5;
       layer.amp = 1.5;
-      layer.speed = maxAngular(layer.amp * 2, cfg.moveSpeed) * BM.rand(0.35, 0.7);
+      // 何度測っても、詰まりが残るのはこの型だけだった。
+      // 2つの穴を追いながら次の層も読むのは負荷が高いので、動きは遅くする。
+      layer.speed = maxAngular(layer.amp * 2, cfg.moveSpeed) * BM.rand(0.18, 0.4);
       layer.gapW = cfg.gapW;
       layer.refresh = function (t) {
         var s = Math.sin(t * this.speed) * this.amp;

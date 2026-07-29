@@ -40,15 +40,17 @@ body{
 /* ---------- HUD ---------- */
 #hud{
   display:flex;
-  gap:12px;
+  gap:10px;
   background:linear-gradient(180deg,#1d1430,#130d20);
   border:1px solid var(--line);
   border-radius:12px;
   padding:8px 10px;
   box-shadow:0 6px 24px rgba(0,0,0,.5), inset 0 1px 0 rgba(255,255,255,.06);
 }
-.hud-cell{display:flex;flex-direction:column;gap:2px;min-width:66px;white-space:nowrap}
-.hud-depth{min-width:88px}
+.hud-cell{display:flex;flex-direction:column;gap:2px;min-width:58px;white-space:nowrap;flex-shrink:0}
+.hud-depth{min-width:86px}
+/* 観戦モードの早送りでスコアが7桁まで伸びるので、その幅を確保しておく */
+.hud-score-cell{min-width:100px}
 .hud-depth .hud-value{font-size:24px;color:#ffd23d}
 .hud-depth small{font-size:12px;opacity:.7;margin-left:1px}
 .hud-grow{flex:1;align-items:flex-end;min-width:0}
@@ -233,7 +235,7 @@ canvas#game{
       <span class="hud-label">DEPTH</span>
       <span id="hud-depth" class="hud-value">0<small>m</small></span>
     </div>
-    <div class="hud-cell">
+    <div class="hud-cell hud-score-cell">
       <span class="hud-label">SCORE</span>
       <span id="hud-score" class="hud-value">0</span>
     </div>
@@ -1100,12 +1102,11 @@ BM.DIRS = [
         { col: L, row: y, side: -1, hit: false, t: 0 },
         { col: R, row: y, side: 1, hit: false, t: 0 }
       ];
-      // 穴はボタンの真下ではなく、決まった1箇所に開ける。
-      // 壁側に開けると出口が「左端か右端」の二択になり、次の層は
-      // その両方から届く位置に置く必要が出て、落差が画面1枚を超えてしまう。
-      // 中央寄りの1点に固定すれば、どちらのボタンを押しても出口は同じ。
-      // 穴は縦坑の中央に固定する。壁寄りに置くと、反対の壁のボタンから
-      // 横断する距離が最大10マスになり、確保した落差では届かなくなる。
+      // 穴はボタンの真下ではなく、縦坑の中央に固定して開ける。
+      // 壁側に開けると出口が「左端か右端」の二択になり、次の層はその両方から
+      // 届く位置に置く必要が出て、落差が画面1枚を超えてしまう。
+      // また中央以外に置くと、反対の壁のボタンからの横断距離が最大10マスになり、
+      // 確保した落差では届かない。1点に固定すればどちらを押しても出口は同じ。
       layer.holeCol = Math.round((L + R) / 2);
       layer.hint = 'ボタン';
       layer.exit = [layer.holeCol - 1, layer.holeCol + 1];
@@ -1170,7 +1171,9 @@ BM.DIRS = [
       layer.mid = BM.clamp(Math.round(layer.gapX), L + 2, R - 2);
       layer.sep = 2.5;
       layer.amp = 1.5;
-      layer.speed = maxAngular(layer.amp * 2, cfg.moveSpeed) * BM.rand(0.35, 0.7);
+      // 何度測っても、詰まりが残るのはこの型だけだった。
+      // 2つの穴を追いながら次の層も読むのは負荷が高いので、動きは遅くする。
+      layer.speed = maxAngular(layer.amp * 2, cfg.moveSpeed) * BM.rand(0.18, 0.4);
       layer.gapW = cfg.gapW;
       layer.refresh = function (t) {
         var s = Math.sin(t * this.speed) * this.amp;
@@ -1607,6 +1610,115 @@ BM.DIRS = [
 </script>
 <script>
 /* =========================================================
+   DEEP FALL — 自動操縦
+
+   本来はテスト用に書いたもの。
+   「操作は苦手だけど構造が最後まで大丈夫か見たい」という用途に、
+   そのまま観戦モードとして本体に載せている。
+
+   テストと本体で同じコードを使うのが肝心。
+   検査に通ったのが「出荷される操縦」でないと意味がない。
+
+   考え方：
+     ・2層先まで見る（人間が画面で見えている範囲と同じ）
+     ・動く穴は「自分が着く時刻」の位置を予測して先回りする
+     ・横は位置ではなく速度を制御する（そうしないと狭い穴で行き過ぎる）
+     ・抜け道が無ければ爆弾を落として掘る
+   ========================================================= */
+(function (BM) {
+  'use strict';
+
+  var L = BM.PLAY_L, R = BM.PLAY_R, TILE = BM.TILE;
+
+  function passable(l, c) {
+    if (!l || !l.cells) return true;
+    var t = l.cells[c];
+    return t !== BM.T_ROCK && t !== BM.T_BOMB;
+  }
+
+  /* 通り抜けられる帯の中心を列挙する。端ではなく中心を狙わないと、
+     閉じてくる穴で削られて死ぬ。 */
+  function runs(l) {
+    var out = [], run = [];
+    for (var c = L; c <= R + 1; c++) {
+      if (c <= R && passable(l, c)) run.push(c);
+      else if (run.length) { out.push(BM.centerX((run[0] + run[run.length - 1]) / 2)); run = []; }
+    }
+    return out;
+  }
+
+  function options(game, l, lead) {
+    if (l.buttons) {
+      var hit = l.buttons.filter(function (b) { return b.hit; });
+      if (hit.length) {
+        // 押した後は、もう片方のボタンではなく開きつつある穴へ向かう
+        var open = runs(l);
+        if (open.length) return open;
+        return [BM.centerX(l.holeCol)];
+      }
+      return l.buttons.map(function (b) { return game.buttonPos(b).x; });
+    }
+    if (l.dynamic && l.refresh && lead > 0) {
+      // 到着時刻の盤面を一時的に作って評価し、必ず元に戻す
+      var sc = l.cells, sg = l.gapX;
+      l.refresh(l.t + l.phase + lead);
+      var o = runs(l);
+      l.cells = sc; l.gapX = sg;
+      return o;
+    }
+    return runs(l);
+  }
+
+  var autopilot = {
+    enabled: false,
+
+    step: function (game) {
+      var p = game.player, I = BM.input;
+      I.keys['ArrowLeft'] = I.keys['ArrowRight'] = false;
+      if (!p.alive || game.state !== BM.S_PLAY) return;
+
+      // 通過し切るまでは今の層を狙い続ける。
+      // 中心が隣のマスへ移った時点で次の層に切り替えると、
+      // まだ体が今の層に残っているのに自分から穴を外れてしまう。
+      var ahead = game.world.layers.filter(function (l) {
+        return (l.row + 1) * TILE > p.y - p.r;
+      }).sort(function (a, b) { return a.row - b.row; });
+
+      var cur = ahead[0], nxt = ahead[1];
+      if (!cur) return;
+
+      var vy = Math.max(60, p.vy);
+      var leadCur = Math.max(0, (cur.row * TILE - p.y) / vy);
+      var opts = options(game, cur, leadCur);
+      if (!opts.length) { I.just[' '] = true; return; }   // 抜け道が無ければ掘る
+
+      var nextOpts = nxt ? options(game, nxt, Math.max(0, (nxt.row * TILE - p.y) / vy)) : null;
+      var best = opts[0], bestCost = Infinity;
+      for (var i = 0; i < opts.length; i++) {
+        var x = opts[i];
+        var cost = Math.abs(x - p.x);
+        if (nextOpts && nextOpts.length) {
+          var nd = Infinity;
+          for (var j = 0; j < nextOpts.length; j++) nd = Math.min(nd, Math.abs(nextOpts[j] - x));
+          cost += nd * 0.7;
+        }
+        if (cost < bestCost) { bestCost = cost; best = x; }
+      }
+
+      // 位置ではなく速度を狙う。残り距離に比例した速度に寄せると行き過ぎない
+      var dx = best - p.x;
+      var vmax = p.moveMax || BM.MOVE_SPEED;
+      var want = BM.clamp(dx * 7, -vmax, vmax);
+      if (p.vx < want - 10) I.keys['ArrowRight'] = true;
+      else if (p.vx > want + 10) I.keys['ArrowLeft'] = true;
+    }
+  };
+
+  BM.autopilot = autopilot;
+})(BM);
+</script>
+<script>
+/* =========================================================
    DEEP FALL — 本体（ロジック + 描画）
    ========================================================= */
 (function (BM) {
@@ -1647,6 +1759,8 @@ BM.DIRS = [
     // 1回目の死で止まると、その先の構造が永久に検査されない。
     this.noDeath = false;
     this.deathLog = [];
+    this.passedCount = 0;
+    this.speedMul = 1;
     this.bgDust = [];
     for (var i = 0; i < 46; i++) {
       this.bgDust.push({ x: Math.random() * W, y: Math.random() * H, r: BM.rand(0.6, 2.2), s: BM.rand(0.15, 0.7) });
@@ -1670,6 +1784,7 @@ BM.DIRS = [
     this.hitStop = 0;
     this.zoneIndex = 0;
     this.deathLog = [];
+    this.passedCount = 0;
     this.camY = this.player.y - H * 0.34;
     this.world.ensure(BM.rowOf(this.camY) + BM.VIEW_ROWS + 24);
     this.state = BM.S_PLAY;
@@ -1685,6 +1800,8 @@ BM.DIRS = [
     if (this.hitStop > 0) { this.hitStop -= dt; dt *= 0.2; }
     this.stateT += dt;
     if (this.chainT > 0) { this.chainT -= dt; if (this.chainT <= 0) this.chain = 0; }
+
+    if (BM.autopilot.enabled) BM.autopilot.step(this);
 
     var p = this.player;
     this.world.ensure(BM.rowOf(p.y) + BM.VIEW_ROWS + 20);
@@ -1979,6 +2096,7 @@ BM.DIRS = [
       if (l.passed) continue;
       if (p.y > (l.row + 1) * TILE) {
         l.passed = true;
+        this.passedCount++;
         this.score += 50;
         // ぎりぎりを抜けたら褒める
         var col = BM.colOf(p.x);
@@ -2595,22 +2713,34 @@ BM.DIRS = [
     void x;
   };
 
-  /* 構造確認モードであることと、本来なら死んでいた回数を出す */
+  /* 観戦モード／構造確認モードの状態表示。
+     何が起きているのか（誰が操作しているのか、詰まったのか）を
+     画面の中で完結して分かるようにしておく。 */
   Game.prototype.drawInspectBadge = function (g) {
     var n = this.deathLog.length;
+    var auto = BM.autopilot.enabled;
+    var lines = [
+      auto ? '観戦モード（自動操縦・無敵）' : '構造確認モード（無敵）',
+      '深度 ' + this.player.deepest + 'm   通過 ' + this.passedCount + ' 層' +
+        (this.speedMul > 1 ? '   速度 ×' + this.speedMul : ''),
+      n === 0 ? '詰まり 0 件 — 構造に問題なし'
+              : '詰まり ' + n + ' 件   最後=' + this.deathLog[n - 1].type +
+                ' (' + this.deathLog[n - 1].depth + 'm)'
+    ];
     g.save();
     g.font = '700 11px system-ui, sans-serif';
-    var label = '構造確認モード（無敵）';
-    var sub = n === 0 ? '本来の死: 0' : ('本来の死: ' + n + '  最後=' + this.deathLog[n - 1].type);
-    var w = Math.max(g.measureText(label).width, g.measureText(sub).width) + 18;
-    g.fillStyle = 'rgba(10,6,18,.78)';
-    g.beginPath(); roundRect(g, 8, 8, w, 34, 7); g.fill();
-    g.strokeStyle = n ? 'rgba(255,90,70,.8)' : 'rgba(120,255,180,.7)';
+    var w = 0;
+    for (var i = 0; i < lines.length; i++) w = Math.max(w, g.measureText(lines[i]).width);
+    w += 18;
+    g.fillStyle = 'rgba(10,6,18,.8)';
+    g.beginPath(); roundRect(g, 8, 8, w, 14 + lines.length * 13, 7); g.fill();
+    g.strokeStyle = n ? 'rgba(255,90,70,.85)' : 'rgba(120,255,180,.75)';
     g.lineWidth = 1.5; g.stroke();
-    g.fillStyle = n ? '#ff8a7a' : '#8affd0';
-    g.fillText(label, 17, 22);
-    g.fillStyle = 'rgba(230,220,255,.8)';
-    g.fillText(sub, 17, 35);
+    for (var j = 0; j < lines.length; j++) {
+      g.fillStyle = j === 0 ? (auto ? '#8fd6ff' : '#8affd0')
+                  : (j === 2 && n ? '#ff8a7a' : 'rgba(230,220,255,.85)');
+      g.fillText(lines[j], 17, 22 + j * 13);
+    }
     g.restore();
   };
 
@@ -2774,6 +2904,7 @@ BM.DIRS = [
         '<div class="menu">' +
         '<button data-act="play">▶ 落ちる</button>' +
         '<button data-act="how">📖 あそびかた</button>' +
+        '<button data-act="watch">👁 観戦モード<small>自動操縦で勝手に潜る。操作不要・墜落なし</small></button>' +
         '</div>' +
         '<div class="tips">最高到達 <b>' + g.bestDepth + 'm</b> ／ ハイスコア <b>' +
         g.bestScore.toLocaleString('en-US') + '</b></div>'
@@ -2813,7 +2944,8 @@ BM.DIRS = [
         '<button data-act="title">◀ タイトルへ</button>' +
         '</div>' +
         '<div class="tips">音楽 <code>M</code> ／ 効果音 <code>N</code><br>' +
-        '構造確認モード（無敵で最後まで通す） <code>I</code></div>'
+        '観戦モード（自動操縦＋無敵） <code>O</code> ／ 早送り <code>T</code><br>' +
+        '無敵だけ（操作は自分で） <code>I</code></div>'
       );
     },
 
@@ -2844,6 +2976,8 @@ BM.DIRS = [
     BM.sound.init();
     switch (name) {
       case 'play':
+        // 通常プレイに戻る。無敵（?inspect=1 や I キー）はそのまま尊重する
+        BM.autopilot.enabled = false;
         ui.reset();
         game.newRun();
         ui.hide();
@@ -2858,6 +2992,14 @@ BM.DIRS = [
         game.stateT = 0;
         BM.sound.stopMusic();
         ui.showTitle(game);
+        break;
+      case 'watch':
+        BM.autopilot.enabled = true;
+        ui.reset();
+        game.newRun();
+        game.noDeath = true;
+        ui.hide();
+        BM.sound.startMusic();
         break;
       case 'how': ui.showHow(); break;
       case 'back': ui.showTitle(game); break;
@@ -2880,9 +3022,25 @@ BM.DIRS = [
       return;
     }
     if (k === 'n') { BM.sound.sfxOn = !BM.sound.sfxOn; return; }
-    if (k === 'i') {   // 構造確認モード（無敵で最後まで通す）
+    if (k === 'i') {   // 構造確認モード（無敵。操作は自分でする）
       game.noDeath = !game.noDeath;
+      if (!game.noDeath) BM.autopilot.enabled = false;
       ui.banner(game.noDeath ? '構造確認モード ON（無敵）' : '構造確認モード OFF');
+      return;
+    }
+    if (k === 'o') {   // 観戦モード。ゲームが自分で潜っていくのを眺めるだけ
+      var on = !BM.autopilot.enabled;
+      BM.autopilot.enabled = on;
+      game.noDeath = on;
+      BM.input.keys['ArrowLeft'] = BM.input.keys['ArrowRight'] = false;
+      ui.banner(on ? '観戦モード ON（自動操縦・無敵）' : '観戦モード OFF');
+      if (on && game.state === BM.S_TITLE) act('play');
+      return;
+    }
+    if (k === 't') {   // 観戦を早送りする（物理はそのまま、更新回数を増やす）
+      var steps = [1, 2, 4, 8];
+      game.speedMul = steps[(steps.indexOf(game.speedMul) + 1) % steps.length];
+      ui.banner('速度 ×' + game.speedMul);
       return;
     }
 
@@ -2907,9 +3065,19 @@ BM.DIRS = [
   function frame(now) {
     var dt = last ? Math.min(0.05, (now - last) / 1000) : 0.016;
     last = now;
-    game.update(dt);
+
+    // 早送りは dt を伸ばすのではなく、細かい固定刻みで何回も更新する。
+    // dt を伸ばすと当たり判定と操作の反応が粗くなり、挙動そのものが変わる
+    // （早送りにしただけで自動操縦が下手になり、詰まりが増えてしまった）。
+    var mul = game.state === BM.S_PLAY ? (game.speedMul || 1) : 1;
+    var target = dt * mul;
+    var n = Math.min(96, Math.max(1, Math.ceil(target / (1 / 120))));
+    var step = target / n;
+    for (var s = 0; s < n; s++) {
+      game.update(step);
+      input.endFrame();   // 1回の押下が複数回の更新で効かないようにする
+    }
     game.render();
-    input.endFrame();
     requestAnimationFrame(frame);
   }
 
@@ -2918,8 +3086,16 @@ BM.DIRS = [
     bindTouch();
     game = new BM.Game(document.getElementById('game'));
     BM.game = game;
-    // ?inspect=1 で、死なずに構造を最後まで見られるモードで起動する
+    // ?inspect=1 … 無敵（操作は自分でする）
+    // ?watch=1   … 観戦モード（自動操縦＋無敵）。そのまま落ち始める
     if (/[?&]inspect=1/.test(location.search)) game.noDeath = true;
+    if (/[?&]watch=1/.test(location.search)) {
+      BM.autopilot.enabled = true;
+      game.noDeath = true;
+      var sp = /[?&]speed=(\d+)/.exec(location.search);
+      if (sp) game.speedMul = BM.clamp(parseInt(sp[1], 10) || 1, 1, 8);
+      setTimeout(function () { act('watch'); }, 60);
+    }
     ui.showTitle(game);
     requestAnimationFrame(frame);
   });

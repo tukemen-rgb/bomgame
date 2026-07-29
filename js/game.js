@@ -39,6 +39,8 @@
     // 1回目の死で止まると、その先の構造が永久に検査されない。
     this.noDeath = false;
     this.deathLog = [];
+    this.passedCount = 0;
+    this.speedMul = 1;
     this.bgDust = [];
     for (var i = 0; i < 46; i++) {
       this.bgDust.push({ x: Math.random() * W, y: Math.random() * H, r: BM.rand(0.6, 2.2), s: BM.rand(0.15, 0.7) });
@@ -62,6 +64,7 @@
     this.hitStop = 0;
     this.zoneIndex = 0;
     this.deathLog = [];
+    this.passedCount = 0;
     this.camY = this.player.y - H * 0.34;
     this.world.ensure(BM.rowOf(this.camY) + BM.VIEW_ROWS + 24);
     this.state = BM.S_PLAY;
@@ -77,6 +80,8 @@
     if (this.hitStop > 0) { this.hitStop -= dt; dt *= 0.2; }
     this.stateT += dt;
     if (this.chainT > 0) { this.chainT -= dt; if (this.chainT <= 0) this.chain = 0; }
+
+    if (BM.autopilot.enabled) BM.autopilot.step(this);
 
     var p = this.player;
     this.world.ensure(BM.rowOf(p.y) + BM.VIEW_ROWS + 20);
@@ -371,6 +376,7 @@
       if (l.passed) continue;
       if (p.y > (l.row + 1) * TILE) {
         l.passed = true;
+        this.passedCount++;
         this.score += 50;
         // ぎりぎりを抜けたら褒める
         var col = BM.colOf(p.x);
@@ -987,22 +993,34 @@
     void x;
   };
 
-  /* 構造確認モードであることと、本来なら死んでいた回数を出す */
+  /* 観戦モード／構造確認モードの状態表示。
+     何が起きているのか（誰が操作しているのか、詰まったのか）を
+     画面の中で完結して分かるようにしておく。 */
   Game.prototype.drawInspectBadge = function (g) {
     var n = this.deathLog.length;
+    var auto = BM.autopilot.enabled;
+    var lines = [
+      auto ? '観戦モード（自動操縦・無敵）' : '構造確認モード（無敵）',
+      '深度 ' + this.player.deepest + 'm   通過 ' + this.passedCount + ' 層' +
+        (this.speedMul > 1 ? '   速度 ×' + this.speedMul : ''),
+      n === 0 ? '詰まり 0 件 — 構造に問題なし'
+              : '詰まり ' + n + ' 件   最後=' + this.deathLog[n - 1].type +
+                ' (' + this.deathLog[n - 1].depth + 'm)'
+    ];
     g.save();
     g.font = '700 11px system-ui, sans-serif';
-    var label = '構造確認モード（無敵）';
-    var sub = n === 0 ? '本来の死: 0' : ('本来の死: ' + n + '  最後=' + this.deathLog[n - 1].type);
-    var w = Math.max(g.measureText(label).width, g.measureText(sub).width) + 18;
-    g.fillStyle = 'rgba(10,6,18,.78)';
-    g.beginPath(); roundRect(g, 8, 8, w, 34, 7); g.fill();
-    g.strokeStyle = n ? 'rgba(255,90,70,.8)' : 'rgba(120,255,180,.7)';
+    var w = 0;
+    for (var i = 0; i < lines.length; i++) w = Math.max(w, g.measureText(lines[i]).width);
+    w += 18;
+    g.fillStyle = 'rgba(10,6,18,.8)';
+    g.beginPath(); roundRect(g, 8, 8, w, 14 + lines.length * 13, 7); g.fill();
+    g.strokeStyle = n ? 'rgba(255,90,70,.85)' : 'rgba(120,255,180,.75)';
     g.lineWidth = 1.5; g.stroke();
-    g.fillStyle = n ? '#ff8a7a' : '#8affd0';
-    g.fillText(label, 17, 22);
-    g.fillStyle = 'rgba(230,220,255,.8)';
-    g.fillText(sub, 17, 35);
+    for (var j = 0; j < lines.length; j++) {
+      g.fillStyle = j === 0 ? (auto ? '#8fd6ff' : '#8affd0')
+                  : (j === 2 && n ? '#ff8a7a' : 'rgba(230,220,255,.85)');
+      g.fillText(lines[j], 17, 22 + j * 13);
+    }
     g.restore();
   };
 

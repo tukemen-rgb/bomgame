@@ -39,91 +39,19 @@ function chromiumPath() {
   return dir ? path.join(base, dir, 'chrome-linux', 'chrome') : undefined;
 }
 
-/* ページ内に仕込む自動操縦。
-   ・2層先まで見る（人間が画面で見えている範囲と同じ）
-   ・動く穴は「自分が着く時刻」の位置を予測して先回りする
-   ・横は位置ではなく速度を制御する（そうしないと狭い穴で行き過ぎる）
-   ・抜け道が無ければ爆弾を落として掘る */
+/* テストは本体に載っている自動操縦（js/autopilot.js）をそのまま使う。
+   テスト専用の複製を持つと、検査に通ったものと出荷されるものが別物になる。
+   ここでは通過数と墜落地点を数えるフックだけを足す。 */
 function installPilot() {
   window.__deaths = [];
   window.__passed = 0;
-  function passable(l, c) {
-    if (!l || !l.cells) return true;
-    const t = l.cells[c];
-    return t !== BM.T_ROCK && t !== BM.T_BOMB;
-  }
-  function runs(l) {
-    const out = []; let run = [];
-    for (let c = BM.PLAY_L; c <= BM.PLAY_R + 1; c++) {
-      if (c <= BM.PLAY_R && passable(l, c)) run.push(c);
-      else if (run.length) { out.push(BM.centerX((run[0] + run[run.length - 1]) / 2)); run = []; }
-    }
-    return out;
-  }
-  function options(g, l, lead) {
-    if (l.buttons) {
-      const hit = l.buttons.filter(b => b.hit);
-      if (hit.length) {
-        // 押した後は、もう片方のボタンではなく開きつつある穴へ向かう
-        const open = runs(l);
-        return open.length ? open : hit.map(b => BM.centerX(b.col));
-      }
-      return l.buttons.map(b => g.buttonPos(b).x);
-    }
-    if (l.dynamic && l.refresh && lead > 0) {
-      // 到着時刻の盤面を一時的に作って評価し、必ず元に戻す
-      const sc = l.cells, sg = l.gapX;
-      l.refresh(l.t + l.phase + lead);
-      const o = runs(l);
-      l.cells = sc; l.gapX = sg;
-      return o;
-    }
-    return runs(l);
-  }
-  function pilot() {
-    const g = BM.game, p = g.player, I = BM.input;
-    I.keys['ArrowLeft'] = I.keys['ArrowRight'] = false;
-    if (!p.alive || g.state !== 'play') return;
-    const ahead = g.world.layers
-      .filter(l => (l.row + 1) * BM.TILE > p.y - p.r)
-      .sort((a, b) => a.row - b.row);
-    const cur = ahead[0], nxt = ahead[1];
-    if (!cur) return;
-    const vy = Math.max(60, p.vy);
-    const leadCur = Math.max(0, (cur.row * BM.TILE - p.y) / vy);
-    const opts = options(g, cur, leadCur);
-    if (!opts.length) { I.just[' '] = true; return; }
-    const nextOpts = nxt ? options(g, nxt, Math.max(0, (nxt.row * BM.TILE - p.y) / vy)) : null;
-    let best = opts[0], bestCost = Infinity;
-    for (const x of opts) {
-      let cost = Math.abs(x - p.x);
-      if (nextOpts && nextOpts.length) {
-        let nd = Infinity;
-        for (const nx of nextOpts) nd = Math.min(nd, Math.abs(nx - x));
-        cost += nd * 0.7;
-      }
-      if (cost < bestCost) { bestCost = cost; best = x; }
-    }
-    // 位置ではなく速度を狙う。残り距離に比例した速度に寄せると行き過ぎない
-    const dx = best - p.x;
-    const vmax = p.moveMax || BM.MOVE_SPEED;   // 深度で上がるので固定値を使わない
-    const want = BM.clamp(dx * 7, -vmax, vmax);
-    if (p.vx < want - 10) I.keys['ArrowRight'] = true;
-    else if (p.vx > want + 10) I.keys['ArrowLeft'] = true;
-  }
-  // 通過数は checkPassed の前後で数える。
-  // update 全体を挟むと、その中の prune で層が消えて差分が負になる。
-  const ocp = BM.Game.prototype.checkPassed;
-  BM.Game.prototype.checkPassed = function () {
-    const n0 = this.world.layers.filter(l => l.passed).length;
-    ocp.call(this);
-    window.__passed += this.world.layers.filter(l => l.passed).length - n0;
-  };
+  BM.autopilot.enabled = true;
   const orig = BM.Game.prototype.update;
   BM.Game.prototype.update = function (dt) {
-    if (this.state === 'play') pilot();
     const was = this.player.alive;
+    const n0 = this.passedCount;
     const r = orig.call(this, dt);
+    window.__passed += this.passedCount - n0;
     if (was && !this.player.alive) {
       const l = this.crashCell ? this.world.layerAt(this.crashCell.row) : null;
       window.__deaths.push({ depth: this.player.deepest, type: l ? l.type : '?' });
