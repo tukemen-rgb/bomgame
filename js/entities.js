@@ -21,6 +21,8 @@
     this.bombs = BM.START_BOMBS;
     this.power = BM.BOMB_POWER;
     this.shield = 0;
+    this.iframe = 0;       // シールド発動直後の無敵
+    this.shieldFlash = 0;  // 発動演出
     this.slow = 0;
 
     this.alive = true;
@@ -49,6 +51,8 @@
     var world = game.world;
 
     if (this.slow > 0) this.slow -= dt;
+    if (this.iframe > 0) this.iframe -= dt;
+    if (this.shieldFlash > 0) this.shieldFlash -= dt;
     if (this.throwT > 0) this.throwT = Math.max(0, this.throwT - dt * 2.6);
     if (this.emptyT > 0) this.emptyT -= dt;
     this.flail += dt * (3 + this.vy / 120);
@@ -114,10 +118,17 @@
           continue;
         }
         // 岩に触れた
+        if (this.iframe > 0) {
+          // 発動直後は、同じ層の残りをシールドを減らさずに突き破る
+          game.smash(col, row);
+          continue;
+        }
         if (this.shield > 0) {
           this.shield--;
+          this.iframe = BM.SHIELD_IFRAME;
+          this.shieldFlash = 0.6;
           game.shieldBreak(this, col, row);
-          this.vy = Math.max(150, this.vy * 0.5);
+          this.vy = Math.max(180, this.vy * 0.6);
           continue;
         }
         game.crash(this, col, row);

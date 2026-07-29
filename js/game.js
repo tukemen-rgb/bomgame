@@ -128,11 +128,15 @@
 
   Game.prototype.dropBomb = function (p) {
     if (p.bombs <= 0) {
-      // 空でも「ポケットを探る」動作はさせる。反応が無いと壊れて見える
+      // 空でも「ポケットを探る」動作はさせる。反応が無いと壊れて見える。
+      // ただし連打で文字が積み上がらないよう、前の表示が消えるまでは出さない。
+      var fresh = p.emptyT <= 0;
       p.throwT = 1;
       p.emptyT = 0.5;
-      BM.sound.empty();
-      this.fx.text(p.x, p.y - 26, 'ポケットが空', '#ff8a8a', 14);
+      if (fresh) {
+        BM.sound.empty();
+        this.fx.text(p.x, p.y - 26, 'ポケットが空', '#ff8a8a', 14);
+      }
       return false;
     }
     p.bombs--;
@@ -224,11 +228,22 @@
     BM.sound.crack();
   };
 
+  /* シールド発動。ただ助かるだけだと何が起きたか分からないので、
+     時間を止めて、青い衝撃波で「岩を割った」ことをはっきり見せる。 */
   Game.prototype.shieldBreak = function (p, col, row) {
-    this.blast(col, row, 2, true);
-    this.fx.shock(p.x, p.y, 80, 0.5, '140,232,255', 5);
-    this.fx.text(p.x, p.y - 26, 'シールド!', '#8ce8ff', 17);
-    this.fx.addShake(10);
+    this.blast(col, row, BM.SHIELD_POWER, true);
+    this.fx.shock(p.x, p.y, 120, 0.6, '140,232,255', 7);
+    this.fx.shock(p.x, p.y, 70, 0.4, '255,255,255', 4);
+    this.fx.text(p.x, p.y - 30, 'シールド消費', '#8ce8ff', 16);
+    this.fx.addShake(14);
+    this.fx.addFlash(0.3, '140,232,255');
+    this.fx.spawn(24, {
+      x: p.x, y: p.y, jitter: 6, speedMin: 80, speedMax: 300,
+      rMin: 1.6, rMax: 4, lifeMin: 0.25, lifeMax: 0.6, drag: 2.6, gravity: 0,
+      colors: ['#8ce8ff', '#ffffff', '#3d9fd0']
+    });
+    this.hitStop = 0.26;
+    BM.ui.banner('シールド発動！ 残り ' + p.shield);
     BM.sound.shield();
   };
 
@@ -691,7 +706,7 @@
       g.save();
       g.setLineDash([3, 9]);
       g.lineDashOffset = -this.world.t * 40;
-      g.strokeStyle = 'rgba(255,90,70,.5)';
+      g.strokeStyle = p.shield > 0 ? 'rgba(140,232,255,.6)' : 'rgba(255,90,70,.5)';
       g.lineWidth = 2;
       g.beginPath();
       g.moveTo(p.x, p.y + 18);
@@ -704,12 +719,26 @@
     g.translate(p.x, p.y);
     g.rotate(p.lean * 0.3);
 
-    if (p.shield > 0) {
+    if (p.shield > 0 || p.shieldFlash > 0) {
+      var boost = p.shieldFlash > 0 ? p.shieldFlash / 0.6 : 0;
+      var rad = 21 + boost * 14;
       g.save();
       g.globalCompositeOperation = 'lighter';
-      g.strokeStyle = 'rgba(140,232,255,' + (0.4 + Math.sin(p.spin * 3) * 0.2).toFixed(2) + ')';
-      g.lineWidth = 2.5;
-      g.beginPath(); g.arc(0, 0, 21, 0, 6.3); g.stroke();
+      // 内側の膜
+      var sg = g.createRadialGradient(0, 0, rad * 0.55, 0, 0, rad);
+      sg.addColorStop(0, 'rgba(140,232,255,0)');
+      sg.addColorStop(1, 'rgba(140,232,255,' + (0.14 + boost * 0.5).toFixed(2) + ')');
+      g.fillStyle = sg;
+      g.beginPath(); g.arc(0, 0, rad, 0, 6.3); g.fill();
+      // 枚数ぶんの回るリング
+      var n = Math.max(1, p.shield);
+      for (var si = 0; si < n; si++) {
+        g.strokeStyle = 'rgba(140,232,255,' + (0.45 + boost * 0.5).toFixed(2) + ')';
+        g.lineWidth = 2.2;
+        g.beginPath();
+        g.arc(0, 0, rad - si * 3.5, p.spin * (si % 2 ? -1.6 : 1.6) + si, p.spin * (si % 2 ? -1.6 : 1.6) + si + 4.4);
+        g.stroke();
+      }
       g.restore();
     }
 

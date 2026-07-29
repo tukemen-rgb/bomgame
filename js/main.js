@@ -65,6 +65,13 @@
         pip.className = 'pip';
         el.pips.appendChild(pip);
       }
+      el.shield = document.getElementById('hud-shield');
+      el.shieldPips = document.getElementById('shield-pips');
+      for (var s = 0; s < BM.SHIELD_MAX; s++) {
+        var sp = document.createElement('span');
+        sp.className = 'pip sh';
+        el.shieldPips.appendChild(sp);
+      }
       el.banner = document.getElementById('combo-banner');
     },
     hide: function () { el.overlay.classList.add('hidden'); },
@@ -78,8 +85,8 @@
     },
     bump: function (node) { node.classList.remove('bump'); void node.offsetWidth; node.classList.add('bump'); },
 
-    _d: -1, _s: -1, _b: -1,
-    reset: function () { this._d = -1; this._s = -1; this._b = -1; },
+    _d: -1, _s: -1, _b: -1, _sh: -1,
+    reset: function () { this._d = -1; this._s = -1; this._b = -1; this._sh = -1; },
 
     syncHud: function (g) {
       var p = g.player;
@@ -100,6 +107,15 @@
         el.ammo.classList.remove('bump'); void el.ammo.offsetWidth; el.ammo.classList.add('bump');
         if (el.touchAmmo) el.touchAmmo.textContent = p.bombs;
         this._b = p.bombs;
+      }
+      if (p.shield !== this._sh) {
+        var sps = el.shieldPips.children;
+        for (var j = 0; j < sps.length; j++) sps[j].classList.toggle('on', j < p.shield);
+        el.shield.classList.toggle('none', p.shield === 0);
+        if (p.shield < this._sh) {
+          el.shield.classList.remove('fire'); void el.shield.offsetWidth; el.shield.classList.add('fire');
+        }
+        this._sh = p.shield;
       }
       el.best.textContent = g.bestDepth + 'm';
     },

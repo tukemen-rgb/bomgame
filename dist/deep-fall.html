@@ -99,6 +99,22 @@ body{
 }
 .tbtn.big{position:relative}
 
+/* シールド。持っているかどうかが常に見えていないと存在を忘れる */
+.hud-shield{min-width:56px}
+.hud-shield .pips{padding-top:4px}
+.pip.sh{width:11px;height:11px;border-radius:3px;transform:rotate(45deg)}
+.pip.sh.on{
+  background:radial-gradient(circle at 35% 30%,#e8fbff,#8ce8ff 55%,#2f8fb8);
+  border-color:#bff0ff;
+  box-shadow:0 0 9px rgba(140,232,255,.9);
+}
+.hud-shield.none{opacity:.4}
+.hud-shield.fire .pips{animation:shFire .5s ease-out}
+@keyframes shFire{
+  0%{transform:scale(1.6);filter:brightness(2.2)}
+  100%{transform:scale(1);filter:none}
+}
+
 /* ---------- stage ---------- */
 #stage-wrap{
   position:relative;
@@ -233,6 +249,10 @@ canvas#game{
       <span class="hud-label">BEST</span>
       <span id="hud-best" class="hud-value hud-small">0m</span>
     </div>
+    <div class="hud-cell hud-shield" id="hud-shield">
+      <span class="hud-label">SHIELD</span>
+      <span id="shield-pips" class="pips"></span>
+    </div>
     <div class="hud-cell hud-grow hud-ammo">
       <span class="hud-label">BOMBS</span>
       <span class="ammo-row">
@@ -319,6 +339,11 @@ BM.START_BOMBS   = 3;
 BM.MAX_BOMBS     = 9;
 BM.FLAME_LIFE    = 0.42;
 BM.CHAIN_DELAY   = 0.055;
+
+/* ---------- シールド ---------- */
+BM.SHIELD_MAX    = 3;
+BM.SHIELD_POWER  = 3;    // 発動時に開ける穴（通常の爆弾より大きい）
+BM.SHIELD_IFRAME = 0.7;  // 発動直後の無敵。厚い層で複数枚消費するのを防ぐ
 
 /* ---------- 地層 ---------- */
 BM.LAYER_GAP_START = 9;   // 層と層の間隔（行）。深くなるほど詰まる
@@ -1088,7 +1113,17 @@ BM.DIRS = [
     shutter: function (layer, cfg) {
       layer.dynamic = true;
       layer.gapW = cfg.gapW + 1;
-      layer.range = [L + 1, R - 1];
+      // 全幅を往復させると、直前の出口から届かない位置に穴が来ることがある。
+      // 到達可能な gapX を中心に、振幅を絞って往復させる。
+      var amp = 3;   // 落差の間に横断し切れる幅に抑える
+      layer.range = [
+        Math.max(L, Math.round(layer.gapX) - amp),
+        Math.min(R, Math.round(layer.gapX) + amp)
+      ];
+      if (layer.range[1] - layer.range[0] < 3) {
+        layer.range = [Math.max(L, Math.min(R - 3, layer.range[0])), 0];
+        layer.range[1] = layer.range[0] + 3;
+      }
       var cap = maxAngular(layer.range[1] - layer.range[0]);
       layer.speed = BM.rand(cap * 0.5, cap) * (Math.random() < 0.5 ? -1 : 1);
       layer.refresh = function (t) {
@@ -1100,17 +1135,22 @@ BM.DIRS = [
         this.gapX = x;
       };
       layer.hint = '横に動く';
-      layer.exit = [L, R]; layer.exitFree = true;   // 好きな位置で待って抜けられる
+      // 抜ける位置は穴の位置＝到着タイミングで決まるので、自分では選べない。
+      // exitFree にすると「好きな場所に構えられる」前提で次の穴が置かれ、
+      // 届かない配置が生まれる。往復範囲の端から端まで届く位置に限る。
+      layer.exit = [layer.range[0], layer.range[1]];
     },
 
     /* 穴が広がったり狭まったりする。閉じ切りはしない（詰み防止） */
     gate: function (layer, cfg) {
       layer.dynamic = true;
       layer.speed = BM.rand(0.9, 1.4);
-      layer.wide = cfg.gapW + 2;
+      layer.wide = Math.max(4, cfg.gapW + 2);
       layer.refresh = function (t) {
         var u = (Math.sin(t * this.speed) + 1) / 2;
-        var w = 1 + Math.round(u * (this.wide - 1));
+        // 最小でも2マス残す。1マスまで閉じると、到着タイミング次第で
+        // どうやっても避けられない瞬間ができてしまう
+        var w = 2 + Math.round(u * (this.wide - 2));
         this.cells = newCells(BM.T_ROCK);
         carve(this.cells, this.gapX, w);
         this.curW = w;
@@ -1119,34 +1159,43 @@ BM.DIRS = [
       layer.exit = [layer.gapX, layer.gapX];   // 位置は固定。狭まる瞬間があるので厳しく見る
     },
 
-    /* 逆向きに動く穴が2つ。どちらを抜けるか選ぶ */
+    /* 一定の間隔を保った2つの穴が、揃って左右にスライドする。
+       以前は左右から寄っては離れる形にしていたが、すれ違う瞬間に
+       「今は開いているが直後に岩になる中央」ができ、そこを狙うと必ず死ぬ罠になっていた。
+       間隔を固定すれば、どちらの穴を選んでも最後まで穴のまま。 */
     spinner: function (layer, cfg) {
       layer.dynamic = true;
-      layer.speed = maxAngular(R - L - 2) * BM.rand(0.5, 0.95);
+      layer.mid = BM.clamp(Math.round(layer.gapX), L + 2, R - 2);
+      layer.sep = 2.5;
+      layer.amp = 1.5;
+      layer.speed = maxAngular(layer.amp * 2) * BM.rand(0.5, 0.95);
       layer.gapW = cfg.gapW;
       layer.refresh = function (t) {
-        var mid = (L + R) / 2, span = (R - L) / 2 - 1;
-        var a = mid + Math.sin(t * this.speed) * span;
-        var b = mid - Math.sin(t * this.speed) * span;
+        var s = Math.sin(t * this.speed) * this.amp;
+        var a = this.mid - this.sep + s;
+        var b = this.mid + this.sep + s;
         this.cells = newCells(BM.T_ROCK);
         carve(this.cells, a, this.gapW);
         carve(this.cells, b, this.gapW);
         this.gapX = a;
       };
       layer.hint = '二重';
-      layer.exit = [L, R]; layer.exitFree = true;
+      layer.exit = [layer.mid - layer.sep - layer.amp, layer.mid + layer.sep + layer.amp];
     },
 
     /* 岩に爆弾が埋まっている。穴は狭いが、撃ち抜けば大穴とボーナス */
-    bombrock: function (layer) {
+    bombrock: function (layer, cfg) {
       layer.cells = newCells(BM.T_ROCK);
-      carve(layer.cells, layer.gapX, 1);
+      // 以前はここが 1 固定で、深度に関わらず最難関の幅になっていた
+      var bw = Math.max(1, cfg.gapW - 1);
+      carve(layer.cells, layer.gapX, bw);
       var spots = BM.shuffle([L + 1, L + 3, L + 5, R - 5, R - 3, R - 1])
         .filter(function (c) { return Math.abs(c - layer.gapX) > 1; })
         .slice(0, BM.randInt(2, 3));
       for (var i = 0; i < spots.length; i++) layer.cells[spots[i]] = BM.T_BOMB;
       layer.hint = '誘爆';
-      layer.exit = [layer.gapX, layer.gapX];
+      var bh = (bw - 1) / 2;
+      layer.exit = [layer.gapX - bh, layer.gapX + bh];
     }
   };
 
@@ -1208,7 +1257,8 @@ BM.DIRS = [
       var rows = this.nextRow;
       var cfg = this.difficulty(rows);
       cfg.vTerm = this.vTerm(rows);
-      var type = pickType(rows, this.lastType);
+      // debugType はテスト専用。1種類の地層だけを並べて通れるか確かめるのに使う
+      var type = this.debugType || pickType(rows, this.lastType);
 
       // ボタン層だけは、ボタンへ横移動が間に合う落差を「置く前に」確保する。
       // 層の後ろで間隔を足しても、そのボタンには届かない。
@@ -1246,6 +1296,22 @@ BM.DIRS = [
       //   出口が自由な層（もろい岩・動く穴）→ 好きな場所で抜けられるので緩い側
       // 出口の性質で自動的に切り替わるように、狭いほうが空なら広いほうを使う。
       var reach = reachTiles(cfg.spacing, cfg.vTerm);
+
+      // 出口の幅が広い層（動く穴・二又など）のあとは、その端から端まで
+      // 届くだけの落差が要る。足りなければ、次の層を置く前に落差を伸ばす。
+      // これをやらないと「どちらの出口を選んだかで詰む」配置が生まれる。
+      if (!this.exitFree) {
+        var minReach = (this.exit.hi - this.exit.lo) / 2 + 0.5;
+        if (reach < minReach) {
+          var needRows = Math.ceil(minReach * cfg.vTerm / (BM.MOVE_SPEED * BM.REACH_MARGIN));
+          rows += needRows - cfg.spacing;
+          this.nextRow = rows;
+          layer.row = rows;
+          cfg.spacing = needRows;
+          reach = reachTiles(cfg.spacing, cfg.vTerm);
+        }
+      }
+
       var lo, hi;
       if (this.exitFree) {
         // 直前の層はどこでも抜けられた＝好きな位置に構えられる
@@ -1359,6 +1425,8 @@ BM.DIRS = [
     this.bombs = BM.START_BOMBS;
     this.power = BM.BOMB_POWER;
     this.shield = 0;
+    this.iframe = 0;       // シールド発動直後の無敵
+    this.shieldFlash = 0;  // 発動演出
     this.slow = 0;
 
     this.alive = true;
@@ -1387,6 +1455,8 @@ BM.DIRS = [
     var world = game.world;
 
     if (this.slow > 0) this.slow -= dt;
+    if (this.iframe > 0) this.iframe -= dt;
+    if (this.shieldFlash > 0) this.shieldFlash -= dt;
     if (this.throwT > 0) this.throwT = Math.max(0, this.throwT - dt * 2.6);
     if (this.emptyT > 0) this.emptyT -= dt;
     this.flail += dt * (3 + this.vy / 120);
@@ -1452,10 +1522,17 @@ BM.DIRS = [
           continue;
         }
         // 岩に触れた
+        if (this.iframe > 0) {
+          // 発動直後は、同じ層の残りをシールドを減らさずに突き破る
+          game.smash(col, row);
+          continue;
+        }
         if (this.shield > 0) {
           this.shield--;
+          this.iframe = BM.SHIELD_IFRAME;
+          this.shieldFlash = 0.6;
           game.shieldBreak(this, col, row);
-          this.vy = Math.max(150, this.vy * 0.5);
+          this.vy = Math.max(180, this.vy * 0.6);
           continue;
         }
         game.crash(this, col, row);
@@ -1630,11 +1707,15 @@ BM.DIRS = [
 
   Game.prototype.dropBomb = function (p) {
     if (p.bombs <= 0) {
-      // 空でも「ポケットを探る」動作はさせる。反応が無いと壊れて見える
+      // 空でも「ポケットを探る」動作はさせる。反応が無いと壊れて見える。
+      // ただし連打で文字が積み上がらないよう、前の表示が消えるまでは出さない。
+      var fresh = p.emptyT <= 0;
       p.throwT = 1;
       p.emptyT = 0.5;
-      BM.sound.empty();
-      this.fx.text(p.x, p.y - 26, 'ポケットが空', '#ff8a8a', 14);
+      if (fresh) {
+        BM.sound.empty();
+        this.fx.text(p.x, p.y - 26, 'ポケットが空', '#ff8a8a', 14);
+      }
       return false;
     }
     p.bombs--;
@@ -1726,11 +1807,22 @@ BM.DIRS = [
     BM.sound.crack();
   };
 
+  /* シールド発動。ただ助かるだけだと何が起きたか分からないので、
+     時間を止めて、青い衝撃波で「岩を割った」ことをはっきり見せる。 */
   Game.prototype.shieldBreak = function (p, col, row) {
-    this.blast(col, row, 2, true);
-    this.fx.shock(p.x, p.y, 80, 0.5, '140,232,255', 5);
-    this.fx.text(p.x, p.y - 26, 'シールド!', '#8ce8ff', 17);
-    this.fx.addShake(10);
+    this.blast(col, row, BM.SHIELD_POWER, true);
+    this.fx.shock(p.x, p.y, 120, 0.6, '140,232,255', 7);
+    this.fx.shock(p.x, p.y, 70, 0.4, '255,255,255', 4);
+    this.fx.text(p.x, p.y - 30, 'シールド消費', '#8ce8ff', 16);
+    this.fx.addShake(14);
+    this.fx.addFlash(0.3, '140,232,255');
+    this.fx.spawn(24, {
+      x: p.x, y: p.y, jitter: 6, speedMin: 80, speedMax: 300,
+      rMin: 1.6, rMax: 4, lifeMin: 0.25, lifeMax: 0.6, drag: 2.6, gravity: 0,
+      colors: ['#8ce8ff', '#ffffff', '#3d9fd0']
+    });
+    this.hitStop = 0.26;
+    BM.ui.banner('シールド発動！ 残り ' + p.shield);
     BM.sound.shield();
   };
 
@@ -2193,7 +2285,7 @@ BM.DIRS = [
       g.save();
       g.setLineDash([3, 9]);
       g.lineDashOffset = -this.world.t * 40;
-      g.strokeStyle = 'rgba(255,90,70,.5)';
+      g.strokeStyle = p.shield > 0 ? 'rgba(140,232,255,.6)' : 'rgba(255,90,70,.5)';
       g.lineWidth = 2;
       g.beginPath();
       g.moveTo(p.x, p.y + 18);
@@ -2206,12 +2298,26 @@ BM.DIRS = [
     g.translate(p.x, p.y);
     g.rotate(p.lean * 0.3);
 
-    if (p.shield > 0) {
+    if (p.shield > 0 || p.shieldFlash > 0) {
+      var boost = p.shieldFlash > 0 ? p.shieldFlash / 0.6 : 0;
+      var rad = 21 + boost * 14;
       g.save();
       g.globalCompositeOperation = 'lighter';
-      g.strokeStyle = 'rgba(140,232,255,' + (0.4 + Math.sin(p.spin * 3) * 0.2).toFixed(2) + ')';
-      g.lineWidth = 2.5;
-      g.beginPath(); g.arc(0, 0, 21, 0, 6.3); g.stroke();
+      // 内側の膜
+      var sg = g.createRadialGradient(0, 0, rad * 0.55, 0, 0, rad);
+      sg.addColorStop(0, 'rgba(140,232,255,0)');
+      sg.addColorStop(1, 'rgba(140,232,255,' + (0.14 + boost * 0.5).toFixed(2) + ')');
+      g.fillStyle = sg;
+      g.beginPath(); g.arc(0, 0, rad, 0, 6.3); g.fill();
+      // 枚数ぶんの回るリング
+      var n = Math.max(1, p.shield);
+      for (var si = 0; si < n; si++) {
+        g.strokeStyle = 'rgba(140,232,255,' + (0.45 + boost * 0.5).toFixed(2) + ')';
+        g.lineWidth = 2.2;
+        g.beginPath();
+        g.arc(0, 0, rad - si * 3.5, p.spin * (si % 2 ? -1.6 : 1.6) + si, p.spin * (si % 2 ? -1.6 : 1.6) + si + 4.4);
+        g.stroke();
+      }
       g.restore();
     }
 
@@ -2528,6 +2634,13 @@ BM.DIRS = [
         pip.className = 'pip';
         el.pips.appendChild(pip);
       }
+      el.shield = document.getElementById('hud-shield');
+      el.shieldPips = document.getElementById('shield-pips');
+      for (var s = 0; s < BM.SHIELD_MAX; s++) {
+        var sp = document.createElement('span');
+        sp.className = 'pip sh';
+        el.shieldPips.appendChild(sp);
+      }
       el.banner = document.getElementById('combo-banner');
     },
     hide: function () { el.overlay.classList.add('hidden'); },
@@ -2541,8 +2654,8 @@ BM.DIRS = [
     },
     bump: function (node) { node.classList.remove('bump'); void node.offsetWidth; node.classList.add('bump'); },
 
-    _d: -1, _s: -1, _b: -1,
-    reset: function () { this._d = -1; this._s = -1; this._b = -1; },
+    _d: -1, _s: -1, _b: -1, _sh: -1,
+    reset: function () { this._d = -1; this._s = -1; this._b = -1; this._sh = -1; },
 
     syncHud: function (g) {
       var p = g.player;
@@ -2563,6 +2676,15 @@ BM.DIRS = [
         el.ammo.classList.remove('bump'); void el.ammo.offsetWidth; el.ammo.classList.add('bump');
         if (el.touchAmmo) el.touchAmmo.textContent = p.bombs;
         this._b = p.bombs;
+      }
+      if (p.shield !== this._sh) {
+        var sps = el.shieldPips.children;
+        for (var j = 0; j < sps.length; j++) sps[j].classList.toggle('on', j < p.shield);
+        el.shield.classList.toggle('none', p.shield === 0);
+        if (p.shield < this._sh) {
+          el.shield.classList.remove('fire'); void el.shield.offsetWidth; el.shield.classList.add('fire');
+        }
+        this._sh = p.shield;
       }
       el.best.textContent = g.bestDepth + 'm';
     },

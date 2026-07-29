@@ -113,7 +113,17 @@
     shutter: function (layer, cfg) {
       layer.dynamic = true;
       layer.gapW = cfg.gapW + 1;
-      layer.range = [L + 1, R - 1];
+      // 全幅を往復させると、直前の出口から届かない位置に穴が来ることがある。
+      // 到達可能な gapX を中心に、振幅を絞って往復させる。
+      var amp = 3;   // 落差の間に横断し切れる幅に抑える
+      layer.range = [
+        Math.max(L, Math.round(layer.gapX) - amp),
+        Math.min(R, Math.round(layer.gapX) + amp)
+      ];
+      if (layer.range[1] - layer.range[0] < 3) {
+        layer.range = [Math.max(L, Math.min(R - 3, layer.range[0])), 0];
+        layer.range[1] = layer.range[0] + 3;
+      }
       var cap = maxAngular(layer.range[1] - layer.range[0]);
       layer.speed = BM.rand(cap * 0.5, cap) * (Math.random() < 0.5 ? -1 : 1);
       layer.refresh = function (t) {
@@ -125,17 +135,22 @@
         this.gapX = x;
       };
       layer.hint = '横に動く';
-      layer.exit = [L, R]; layer.exitFree = true;   // 好きな位置で待って抜けられる
+      // 抜ける位置は穴の位置＝到着タイミングで決まるので、自分では選べない。
+      // exitFree にすると「好きな場所に構えられる」前提で次の穴が置かれ、
+      // 届かない配置が生まれる。往復範囲の端から端まで届く位置に限る。
+      layer.exit = [layer.range[0], layer.range[1]];
     },
 
     /* 穴が広がったり狭まったりする。閉じ切りはしない（詰み防止） */
     gate: function (layer, cfg) {
       layer.dynamic = true;
       layer.speed = BM.rand(0.9, 1.4);
-      layer.wide = cfg.gapW + 2;
+      layer.wide = Math.max(4, cfg.gapW + 2);
       layer.refresh = function (t) {
         var u = (Math.sin(t * this.speed) + 1) / 2;
-        var w = 1 + Math.round(u * (this.wide - 1));
+        // 最小でも2マス残す。1マスまで閉じると、到着タイミング次第で
+        // どうやっても避けられない瞬間ができてしまう
+        var w = 2 + Math.round(u * (this.wide - 2));
         this.cells = newCells(BM.T_ROCK);
         carve(this.cells, this.gapX, w);
         this.curW = w;
@@ -144,34 +159,43 @@
       layer.exit = [layer.gapX, layer.gapX];   // 位置は固定。狭まる瞬間があるので厳しく見る
     },
 
-    /* 逆向きに動く穴が2つ。どちらを抜けるか選ぶ */
+    /* 一定の間隔を保った2つの穴が、揃って左右にスライドする。
+       以前は左右から寄っては離れる形にしていたが、すれ違う瞬間に
+       「今は開いているが直後に岩になる中央」ができ、そこを狙うと必ず死ぬ罠になっていた。
+       間隔を固定すれば、どちらの穴を選んでも最後まで穴のまま。 */
     spinner: function (layer, cfg) {
       layer.dynamic = true;
-      layer.speed = maxAngular(R - L - 2) * BM.rand(0.5, 0.95);
+      layer.mid = BM.clamp(Math.round(layer.gapX), L + 2, R - 2);
+      layer.sep = 2.5;
+      layer.amp = 1.5;
+      layer.speed = maxAngular(layer.amp * 2) * BM.rand(0.5, 0.95);
       layer.gapW = cfg.gapW;
       layer.refresh = function (t) {
-        var mid = (L + R) / 2, span = (R - L) / 2 - 1;
-        var a = mid + Math.sin(t * this.speed) * span;
-        var b = mid - Math.sin(t * this.speed) * span;
+        var s = Math.sin(t * this.speed) * this.amp;
+        var a = this.mid - this.sep + s;
+        var b = this.mid + this.sep + s;
         this.cells = newCells(BM.T_ROCK);
         carve(this.cells, a, this.gapW);
         carve(this.cells, b, this.gapW);
         this.gapX = a;
       };
       layer.hint = '二重';
-      layer.exit = [L, R]; layer.exitFree = true;
+      layer.exit = [layer.mid - layer.sep - layer.amp, layer.mid + layer.sep + layer.amp];
     },
 
     /* 岩に爆弾が埋まっている。穴は狭いが、撃ち抜けば大穴とボーナス */
-    bombrock: function (layer) {
+    bombrock: function (layer, cfg) {
       layer.cells = newCells(BM.T_ROCK);
-      carve(layer.cells, layer.gapX, 1);
+      // 以前はここが 1 固定で、深度に関わらず最難関の幅になっていた
+      var bw = Math.max(1, cfg.gapW - 1);
+      carve(layer.cells, layer.gapX, bw);
       var spots = BM.shuffle([L + 1, L + 3, L + 5, R - 5, R - 3, R - 1])
         .filter(function (c) { return Math.abs(c - layer.gapX) > 1; })
         .slice(0, BM.randInt(2, 3));
       for (var i = 0; i < spots.length; i++) layer.cells[spots[i]] = BM.T_BOMB;
       layer.hint = '誘爆';
-      layer.exit = [layer.gapX, layer.gapX];
+      var bh = (bw - 1) / 2;
+      layer.exit = [layer.gapX - bh, layer.gapX + bh];
     }
   };
 
@@ -233,7 +257,8 @@
       var rows = this.nextRow;
       var cfg = this.difficulty(rows);
       cfg.vTerm = this.vTerm(rows);
-      var type = pickType(rows, this.lastType);
+      // debugType はテスト専用。1種類の地層だけを並べて通れるか確かめるのに使う
+      var type = this.debugType || pickType(rows, this.lastType);
 
       // ボタン層だけは、ボタンへ横移動が間に合う落差を「置く前に」確保する。
       // 層の後ろで間隔を足しても、そのボタンには届かない。
@@ -271,6 +296,22 @@
       //   出口が自由な層（もろい岩・動く穴）→ 好きな場所で抜けられるので緩い側
       // 出口の性質で自動的に切り替わるように、狭いほうが空なら広いほうを使う。
       var reach = reachTiles(cfg.spacing, cfg.vTerm);
+
+      // 出口の幅が広い層（動く穴・二又など）のあとは、その端から端まで
+      // 届くだけの落差が要る。足りなければ、次の層を置く前に落差を伸ばす。
+      // これをやらないと「どちらの出口を選んだかで詰む」配置が生まれる。
+      if (!this.exitFree) {
+        var minReach = (this.exit.hi - this.exit.lo) / 2 + 0.5;
+        if (reach < minReach) {
+          var needRows = Math.ceil(minReach * cfg.vTerm / (BM.MOVE_SPEED * BM.REACH_MARGIN));
+          rows += needRows - cfg.spacing;
+          this.nextRow = rows;
+          layer.row = rows;
+          cfg.spacing = needRows;
+          reach = reachTiles(cfg.spacing, cfg.vTerm);
+        }
+      }
+
       var lo, hi;
       if (this.exitFree) {
         // 直前の層はどこでも抜けられた＝好きな位置に構えられる

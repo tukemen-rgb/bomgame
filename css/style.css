@@ -92,6 +92,22 @@ body{
 }
 .tbtn.big{position:relative}
 
+/* シールド。持っているかどうかが常に見えていないと存在を忘れる */
+.hud-shield{min-width:56px}
+.hud-shield .pips{padding-top:4px}
+.pip.sh{width:11px;height:11px;border-radius:3px;transform:rotate(45deg)}
+.pip.sh.on{
+  background:radial-gradient(circle at 35% 30%,#e8fbff,#8ce8ff 55%,#2f8fb8);
+  border-color:#bff0ff;
+  box-shadow:0 0 9px rgba(140,232,255,.9);
+}
+.hud-shield.none{opacity:.4}
+.hud-shield.fire .pips{animation:shFire .5s ease-out}
+@keyframes shFire{
+  0%{transform:scale(1.6);filter:brightness(2.2)}
+  100%{transform:scale(1);filter:none}
+}
+
 /* ---------- stage ---------- */
 #stage-wrap{
   position:relative;

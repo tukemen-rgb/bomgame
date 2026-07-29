@@ -49,6 +49,11 @@ BM.MAX_BOMBS     = 9;
 BM.FLAME_LIFE    = 0.42;
 BM.CHAIN_DELAY   = 0.055;
 
+/* ---------- シールド ---------- */
+BM.SHIELD_MAX    = 3;
+BM.SHIELD_POWER  = 3;    // 発動時に開ける穴（通常の爆弾より大きい）
+BM.SHIELD_IFRAME = 0.7;  // 発動直後の無敵。厚い層で複数枚消費するのを防ぐ
+
 /* ---------- 地層 ---------- */
 BM.LAYER_GAP_START = 9;   // 層と層の間隔（行）。深くなるほど詰まる
 BM.LAYER_GAP_MIN   = 5;
