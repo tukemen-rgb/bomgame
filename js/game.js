@@ -44,7 +44,7 @@
     this.introT = 0;
     this.stateT = 0;
     this.blockedByBomb = null;
-    this.bestScore = Number(localStorage.getItem('blastrush.best') || 0);
+    this.bestScore = Number(BM.store.get('blastrush.best', 0)) || 0;
     this.roundWinner = null;
     this.timeUpDone = false;
     this.lastTickSec = -1;
@@ -518,7 +518,7 @@
     }
     if (this.score > this.bestScore) {
       this.bestScore = this.score;
-      localStorage.setItem('blastrush.best', String(this.bestScore));
+      BM.store.set('blastrush.best', String(this.bestScore));
     }
     return gained;
   };
@@ -808,7 +808,7 @@
     this.score += bonus;
     if (this.score > this.bestScore) {
       this.bestScore = this.score;
-      localStorage.setItem('blastrush.best', String(this.bestScore));
+      BM.store.set('blastrush.best', String(this.bestScore));
     }
     this.state = BM.S_CLEAR;
     this.stateT = 0;

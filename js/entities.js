@@ -175,11 +175,12 @@
   /* =========================================================
      Enemy
      ========================================================= */
+  /* stain は「床を汚す間隔」の倍率。のろい雑魚ほど塗りの脅威は低い。 */
   var ENEMY_DEF = {
-    balloon: { speed: 62,  hp: 1, score: 100, color: '#ff8fa3', dark: '#a33b52', brain: 'wander', eyes: 2 },
-    chaser:  { speed: 88,  hp: 1, score: 200, color: '#7ad4ff', dark: '#2f6f96', brain: 'chase',  eyes: 2 },
-    ghost:   { speed: 70,  hp: 1, score: 300, color: '#c9a6ff', dark: '#5c3d94', brain: 'ghost',  eyes: 2, phase: true },
-    bomber:  { speed: 96,  hp: 2, score: 500, color: '#ffd166', dark: '#a06a1a', brain: 'bomber', eyes: 2 }
+    balloon: { speed: 62,  hp: 1, score: 100, color: '#ff8fa3', dark: '#a33b52', brain: 'wander', stain: 1.6 },
+    chaser:  { speed: 88,  hp: 1, score: 200, color: '#7ad4ff', dark: '#2f6f96', brain: 'chase',  stain: 1.0 },
+    ghost:   { speed: 70,  hp: 1, score: 300, color: '#c9a6ff', dark: '#5c3d94', brain: 'ghost',  stain: 1.2, phase: true },
+    bomber:  { speed: 96,  hp: 2, score: 500, color: '#ffd166', dark: '#a06a1a', brain: 'bomber', stain: 0.8 }
   };
   BM.ENEMY_DEF = ENEMY_DEF;
 
@@ -235,7 +236,7 @@
     // 歩いた跡を敵チームの色に汚していく。放置すると塗り率がじりじり削られる。
     this.stainT -= dt;
     if (this.stainT <= 0) {
-      this.stainT = BM.STAIN_INTERVAL;
+      this.stainT = BM.STAIN_INTERVAL * this.def.stain;
       if (game.map.paint(cx, cy, this.team)) {
         game.onPainted(this.team, 1, this.x, this.y, null);
         BM.fx.spawn(2, {

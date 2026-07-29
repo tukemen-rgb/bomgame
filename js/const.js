@@ -47,7 +47,9 @@ BM.TEAMS = {
 BM.ENEMY_TEAM = 2;               // 1人用では敵チームが 2
 BM.INK_SPEED_BONUS   = 0.30;     // 自陣の床は速い
 BM.INK_SPEED_PENALTY = -0.26;    // 敵陣の床は遅い
-BM.STAIN_INTERVAL = 0.42;        // 敵が床を汚す間隔（秒）
+BM.STAIN_INTERVAL = 0.8;         // 敵が床を汚す間隔（秒）
+                                 // 速すぎると開始直後から負けている感覚になる。
+                                 // 「放置すると削られる」が伝わる最小の速さに留める。
 BM.KILL_SPLASH = 2;              // 敵撃破時に飛び散るインクの半径（マス）
 BM.DEATH_WIPE = 1;               // やられたとき中立化される自陣の半径
 
@@ -68,6 +70,19 @@ BM.MAX_BOMBS     = 8;
 BM.INVULN_TIME   = 2.4;
 BM.KICK_SPEED    = 300;
 BM.COMBO_WINDOW  = 1.0;
+
+/* ---------- 保存（サンドボックス下では localStorage が例外を投げることがある） ---------- */
+BM.store = {
+  get: function (k, fallback) {
+    try {
+      var v = window.localStorage.getItem(k);
+      return v == null ? fallback : v;
+    } catch (e) { return fallback; }
+  },
+  set: function (k, v) {
+    try { window.localStorage.setItem(k, v); } catch (e) { /* 保存できなくても遊べる */ }
+  }
+};
 
 /* ---------- 汎用ヘルパ ---------- */
 BM.clamp = function (v, a, b) { return v < a ? a : (v > b ? b : v); };
