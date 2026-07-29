@@ -106,7 +106,8 @@ function installPilot() {
     }
     // 位置ではなく速度を狙う。残り距離に比例した速度に寄せると行き過ぎない
     const dx = best - p.x;
-    const want = BM.clamp(dx * 7, -BM.MOVE_SPEED, BM.MOVE_SPEED);
+    const vmax = p.moveMax || BM.MOVE_SPEED;   // 深度で上がるので固定値を使わない
+    const want = BM.clamp(dx * 7, -vmax, vmax);
     if (p.vx < want - 10) I.keys['ArrowRight'] = true;
     else if (p.vx > want + 10) I.keys['ArrowLeft'] = true;
   }

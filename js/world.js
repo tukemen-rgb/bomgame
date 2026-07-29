@@ -16,8 +16,8 @@
   var COLS = BM.COLS, L = BM.PLAY_L, R = BM.PLAY_R, TILE = BM.TILE;
 
   /* 落下中に横へ何マス動けるか */
-  function reachTiles(dropRows, vTerm) {
-    return (BM.MOVE_SPEED * (dropRows * TILE / vTerm) * BM.REACH_MARGIN) / TILE;
+  function reachTiles(dropRows, vTerm, moveSpeed) {
+    return ((moveSpeed || BM.MOVE_SPEED) * (dropRows * TILE / vTerm) * BM.REACH_MARGIN) / TILE;
   }
 
   function newCells(fill) {
@@ -29,8 +29,8 @@
   /* 動く穴の角速度の上限。
      穴がプレイヤーの横移動より速く逃げると、追いつけず理不尽になる。
      振幅 span/2 タイルの往復なので、最大速度 = span/2 * 角速度 [タイル/秒]。 */
-  function maxAngular(spanTiles) {
-    var maxPx = BM.MOVE_SPEED * 0.55;
+  function maxAngular(spanTiles, moveSpeed) {
+    var maxPx = (moveSpeed || BM.MOVE_SPEED) * 0.55;
     return maxPx / (TILE * Math.max(1, spanTiles / 2));
   }
 
@@ -104,9 +104,15 @@
         { col: L, row: y, side: -1, hit: false, t: 0 },
         { col: R, row: y, side: 1, hit: false, t: 0 }
       ];
-      layer.gapX = (L + R) / 2;
+      // 穴はボタンの真下ではなく、決まった1箇所に開ける。
+      // 壁側に開けると出口が「左端か右端」の二択になり、次の層は
+      // その両方から届く位置に置く必要が出て、落差が画面1枚を超えてしまう。
+      // 中央寄りの1点に固定すれば、どちらのボタンを押しても出口は同じ。
+      // 穴は縦坑の中央に固定する。壁寄りに置くと、反対の壁のボタンから
+      // 横断する距離が最大10マスになり、確保した落差では届かなくなる。
+      layer.holeCol = Math.round((L + R) / 2);
       layer.hint = 'ボタン';
-      layer.exit = [L, R];      // どちらの壁を使ったかで出口が変わる
+      layer.exit = [layer.holeCol - 1, layer.holeCol + 1];
     },
 
     /* 穴が横にスライドし続ける */
@@ -124,7 +130,7 @@
         layer.range = [Math.max(L, Math.min(R - 3, layer.range[0])), 0];
         layer.range[1] = layer.range[0] + 3;
       }
-      var cap = maxAngular(layer.range[1] - layer.range[0]);
+      var cap = maxAngular(layer.range[1] - layer.range[0], cfg.moveSpeed);
       layer.speed = BM.rand(cap * 0.5, cap) * (Math.random() < 0.5 ? -1 : 1);
       layer.refresh = function (t) {
         var span = this.range[1] - this.range[0];
@@ -168,7 +174,7 @@
       layer.mid = BM.clamp(Math.round(layer.gapX), L + 2, R - 2);
       layer.sep = 2.5;
       layer.amp = 1.5;
-      layer.speed = maxAngular(layer.amp * 2) * BM.rand(0.5, 0.95);
+      layer.speed = maxAngular(layer.amp * 2, cfg.moveSpeed) * BM.rand(0.35, 0.7);
       layer.gapW = cfg.gapW;
       layer.refresh = function (t) {
         var s = Math.sin(t * this.speed) * this.amp;
@@ -233,9 +239,15 @@
     this.nextRow = 12;      // 最初の数行は何も無い（落ち始める助走）
     this.exit = { lo: 7, hi: 7 };   // 直前の層を抜けたあと居られる列の範囲
     this.exitFree = false;          // その範囲を自分で選べたか（もろい岩・動く穴）
+    this.lastRow = 0;               // 直前の層の行。落差はここから測る
     this.lastType = '';
     this.t = 0;
     this.deepest = 0;
+  };
+
+  /* 横移動の速さも深度で上げる。落下だけ速くすると比率が壊れる。 */
+  World.prototype.moveSpeed = function (rows) {
+    return BM.lerp(BM.MOVE_SPEED, BM.MOVE_SPEED_MAX, BM.clamp(rows / 400, 0, 1));
   };
 
   World.prototype.vTerm = function (rows) {
@@ -253,6 +265,7 @@
     var gapTime = BM.lerp(BM.LAYER_TIME_START, BM.LAYER_TIME_MIN, k);
     return {
       gapTime: gapTime,
+      moveSpeed: this.moveSpeed(rows),
       spacing: Math.max(5, Math.round(gapTime * vt / TILE)),
       // 当たり判定が 24px なので、1マス(40px)の穴は許容 ±8px しかない。
       // 落下を止められない以上これは詰みなので、2マスを下限にする。
@@ -265,8 +278,12 @@
     var guard = 0;
     while (this.nextRow <= untilRow && guard++ < 400) {
       var rows = this.nextRow;
+      // 到達可能性は「その深度の標準間隔」ではなく、直前の層からの
+      // 実際の落差で測る。ここがズレると、届かない位置に穴が置かれる。
+      var prevRow = this.lastRow;
       var cfg = this.difficulty(rows);
       cfg.vTerm = this.vTerm(rows);
+      cfg.moveSpeed = this.moveSpeed(rows);
       // debugType はテスト専用。1種類の地層だけを並べて通れるか確かめるのに使う
       var type = this.debugType || pickType(rows, this.lastType);
 
@@ -278,12 +295,14 @@
         for (var bx = Math.floor(this.exit.lo); bx <= Math.ceil(this.exit.hi); bx++) {
           bneed = Math.max(bneed, Math.min(Math.abs(bx - L), Math.abs(bx - R)));
         }
-        cfg.buttonOffset = 4;
-        var needRows = Math.ceil(bneed * cfg.vTerm / (BM.MOVE_SPEED * BM.REACH_MARGIN)) + cfg.buttonOffset + 2;
-        if (needRows > cfg.spacing) {
-          rows += needRows - cfg.spacing;
+        // ボタン（壁）から穴（中央寄り）まで横断する時間が要る。
+        // ここを固定値にすると、押せたのに穴へ届かないという詰みになる。
+        var holeDist = (R - L) / 2 + 1;
+        cfg.buttonOffset = Math.ceil(holeDist * cfg.vTerm / (cfg.moveSpeed * BM.REACH_MARGIN)) + 1;
+        var needRows = Math.ceil(bneed * cfg.vTerm / (cfg.moveSpeed * BM.REACH_MARGIN)) + cfg.buttonOffset + 2;
+        if (needRows > rows - prevRow) {
+          rows = prevRow + needRows;
           this.nextRow = rows;
-          cfg.spacing = needRows;
         }
       }
 
@@ -305,7 +324,7 @@
       //   出口が固定の層（穴・ボタンなど）→ 出口の端から端まで全部届く範囲（厳しい側）
       //   出口が自由な層（もろい岩・動く穴）→ 好きな場所で抜けられるので緩い側
       // 出口の性質で自動的に切り替わるように、狭いほうが空なら広いほうを使う。
-      var reach = reachTiles(cfg.spacing, cfg.vTerm);
+      var reach = reachTiles(rows - prevRow, cfg.vTerm, cfg.moveSpeed);
 
       // 出口の幅が広い層（動く穴・二又など）のあとは、その端から端まで
       // 届くだけの落差が要る。足りなければ、次の層を置く前に落差を伸ばす。
@@ -313,12 +332,11 @@
       if (!this.exitFree) {
         var minReach = (this.exit.hi - this.exit.lo) / 2 + 0.5;
         if (reach < minReach) {
-          var needRows = Math.ceil(minReach * cfg.vTerm / (BM.MOVE_SPEED * BM.REACH_MARGIN));
-          rows += needRows - cfg.spacing;
+          var needRows2 = Math.ceil(minReach * cfg.vTerm / (cfg.moveSpeed * BM.REACH_MARGIN));
+          rows = prevRow + Math.max(rows - prevRow, needRows2);
           this.nextRow = rows;
           layer.row = rows;
-          cfg.spacing = needRows;
-          reach = reachTiles(cfg.spacing, cfg.vTerm);
+          reach = reachTiles(rows - prevRow, cfg.vTerm, cfg.moveSpeed);
         }
       }
 
@@ -362,7 +380,10 @@
       };
       this.exitFree = !!layer.exitFree;
       this.lastType = type;
-      this.nextRow += cfg.spacing + (layer.extraRows || 0);
+      // 落差の延長（ボタン層・出口が広い層）は、その層自身を下へずらすためのもの。
+      // そのまま次の間隔にも使うと、後ろの層まで画面外へ押し出してしまう。
+      this.lastRow = layer.row;
+      this.nextRow = layer.row + this.difficulty(layer.row).spacing;
       this.deepest = layer.row;
     }
   };

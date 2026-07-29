@@ -1,11 +1,13 @@
 {
-  "name": "blast-rush",
+  "name": "deep-fall",
   "version": "1.0.0",
-  "description": "ボンバーマンを参考にした爽快系の爆弾アクション。依存なしの HTML5 Canvas ゲーム。",
+  "description": "落ち続けるしかない縦スクロール爆弾アクション。依存なしの HTML5 Canvas ゲーム。",
   "private": true,
   "scripts": {
     "start": "python3 -m http.server 8901",
-    "test": "node test/smoke.js"
+    "test": "node test/smoke.js",
+    "audit": "node test/audit.js",
+    "bundle": "node tools/bundle.js"
   },
   "devDependencies": {
     "playwright": "^1.62.0"

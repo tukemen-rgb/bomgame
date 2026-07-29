@@ -318,7 +318,8 @@
   Game.prototype.checkButtons = function () {
     var p = this.player;
     for (var i = 0; i < this.world.layers.length; i++) {
-      var list = this.world.layers[i].buttons;
+      var layer = this.world.layers[i];
+      var list = layer.buttons;
       if (!list) continue;
       for (var j = 0; j < list.length; j++) {
         var b = list[j];
@@ -328,7 +329,8 @@
           b.hit = true;
           b.t = 0;
           // 押した瞬間に爆弾が落ちる。プレイヤーより速いので必ず先に穴が開く
-          this.bombs.push(new BM.Bomb(BM.centerX(b.col), pos.y + 12, p.power + 1, true));
+          // 穴は決まった位置に開く。導線がそこを指しているので迷わない
+          this.bombs.push(new BM.Bomb(BM.centerX(layer.holeCol), pos.y + 12, p.power + 1, true));
           this.fx.shock(pos.x, pos.y, 70, 0.4, '120,255,180', 4);
           this.fx.text(pos.x, pos.y - 24, 'ON', '#8affd0', 18);
           this.fx.addShake(5);
@@ -602,8 +604,8 @@
       g.strokeStyle = b.hit ? 'rgba(140,255,200,.55)' : 'rgba(255,120,110,' + (0.22 + pulse * 0.2).toFixed(2) + ')';
       g.lineWidth = 2;
       g.beginPath();
-      g.moveTo(BM.centerX(b.col), pos.y);
-      g.lineTo(BM.centerX(b.col), l.row * TILE);
+      g.moveTo(pos.x, pos.y);
+      g.lineTo(BM.centerX(l.holeCol), l.row * TILE);
       g.stroke();
       g.restore();
 

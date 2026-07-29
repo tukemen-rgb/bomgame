@@ -60,9 +60,11 @@
     // ---- 横 ----
     var ix = (K['ArrowRight'] || K['d'] ? 1 : 0) - (K['ArrowLeft'] || K['a'] ? 1 : 0);
     this.dir = ix;
+    var msBase = world.moveSpeed(this.deepest);
+    this.moveMax = msBase;
     if (ix !== 0) {
-      this.vx += ix * BM.MOVE_ACCEL * dt;
-      var max = BM.MOVE_SPEED * (this.slow > 0 ? 0.85 : 1);
+      this.vx += ix * BM.MOVE_ACCEL * (msBase / BM.MOVE_SPEED) * dt;
+      var max = msBase * (this.slow > 0 ? 0.85 : 1);
       this.vx = BM.clamp(this.vx, -max, max);
     } else {
       var f = BM.MOVE_FRICTION * dt;
