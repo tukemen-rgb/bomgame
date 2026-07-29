@@ -56,7 +56,15 @@
       el.depth = document.getElementById('hud-depth');
       el.score = document.getElementById('hud-score');
       el.best = document.getElementById('hud-best');
-      el.bombs = document.getElementById('hud-bombs');
+      el.ammo = document.querySelector('.hud-ammo');
+      el.pips = document.getElementById('ammo-pips');
+      el.ammoCount = document.getElementById('ammo-count');
+      el.touchAmmo = document.getElementById('touch-ammo');
+      for (var i = 0; i < BM.MAX_BOMBS; i++) {
+        var pip = document.createElement('span');
+        pip.className = 'pip';
+        el.pips.appendChild(pip);
+      }
       el.banner = document.getElementById('combo-banner');
     },
     hide: function () { el.overlay.classList.add('hidden'); },
@@ -85,10 +93,12 @@
         this._s = g.score;
       }
       if (p.bombs !== this._b) {
-        el.bombs.textContent = p.bombs > 5
-          ? '💣×' + p.bombs
-          : (new Array(p.bombs + 1).join('💣') || '—');
-        el.bombs.classList.toggle('warn', p.bombs === 0);
+        var pips = el.pips.children;
+        for (var i = 0; i < pips.length; i++) pips[i].classList.toggle('on', i < p.bombs);
+        el.ammoCount.innerHTML = p.bombs + '<i>/' + BM.MAX_BOMBS + '</i>';
+        el.ammo.classList.toggle('empty', p.bombs === 0);
+        el.ammo.classList.remove('bump'); void el.ammo.offsetWidth; el.ammo.classList.add('bump');
+        if (el.touchAmmo) el.touchAmmo.textContent = p.bombs;
         this._b = p.bombs;
       }
       el.best.textContent = g.bestDepth + 'm';
@@ -122,7 +132,10 @@
         '・<b>ボタン</b>（壁の赤いランプ）… 全面岩の層に来たらこれ。落ちながら触れると' +
         '爆弾が落ちて穴が開く。点線が落下地点を教えてくれる<br>' +
         '・<b>埋まった爆弾</b>（オレンジに光る岩）… 自分の爆弾を当てると誘爆して大穴。連鎖ほど高得点<br>' +
-        '・<b>自前の爆弾</b> … どの層でも真下に落として掘れる。数は有限なので切り札に</p>' +
+        '・<b>自前の爆弾</b> … どの層でも真下に落として掘れる</p>' +
+        '<p><b>爆弾は腰のポーチから取り出す。</b>初期3個・最大9個で、拾わない限り増えない。<br>' +
+        '画面右上の丸が残数。<b style="color:#ff8a6a">0になると赤く点滅し、押しても空振りする</b>ので、<br>' +
+        'どの層で使うかを決めてから落とすこと。💣 のアイテムで1個補充できる。</p>' +
         '<p>100m ごとに地層が変わり、落下速度も層の間隔も上がっていく。</p>' +
         '</div>' +
         '<div class="menu"><button data-act="back">◀ もどる</button></div>'

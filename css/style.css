@@ -62,6 +62,36 @@ body{
 @keyframes pulse{50%{opacity:.35}}
 @keyframes bump{0%{transform:scale(1.5);color:var(--hot2)}100%{transform:scale(1)}}
 
+/* ---------- 爆弾の残数 ---------- */
+.hud-ammo{align-items:flex-end}
+.ammo-row{display:flex;align-items:center;gap:8px}
+.pips{display:flex;gap:3px}
+.pip{
+  width:8px;height:8px;border-radius:50%;
+  border:1px solid #4a3a6b;
+  background:#1a1230;
+  transition:background .12s ease, box-shadow .12s ease;
+}
+.pip.on{
+  background:radial-gradient(circle at 35% 30%,#ffe9a8,#ff9a3c 60%,#c2521a);
+  border-color:#ffb35c;
+  box-shadow:0 0 7px rgba(255,150,60,.8);
+}
+.ammo-count{
+  font-size:19px;font-weight:800;line-height:1;
+  font-variant-numeric:tabular-nums;
+  color:#ffd9a8;
+  min-width:44px;text-align:right;
+}
+.ammo-count i{font-style:normal;font-size:11px;opacity:.5;font-weight:600}
+.hud-ammo.empty .ammo-count{color:var(--hot);animation:pulse .5s infinite}
+.hud-ammo.bump .ammo-count{animation:bump .25s ease-out}
+#touch-ammo{
+  position:absolute;right:6px;bottom:4px;
+  font-size:13px;font-weight:800;color:#ffd9a8;
+}
+.tbtn.big{position:relative}
+
 /* ---------- stage ---------- */
 #stage-wrap{
   position:relative;

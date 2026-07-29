@@ -23,9 +23,12 @@
       <span class="hud-label">BEST</span>
       <span id="hud-best" class="hud-value hud-small">0m</span>
     </div>
-    <div class="hud-cell hud-grow">
+    <div class="hud-cell hud-grow hud-ammo">
       <span class="hud-label">BOMBS</span>
-      <span id="hud-bombs" class="hud-value hud-small">💣💣💣</span>
+      <span class="ammo-row">
+        <span id="ammo-pips" class="pips"></span>
+        <span id="ammo-count" class="ammo-count">3<i>/9</i></span>
+      </span>
     </div>
   </header>
 
@@ -41,7 +44,7 @@
 
   <div id="touch" aria-hidden="true">
     <button class="tbtn wide" data-key="ArrowLeft">◀</button>
-    <button class="tbtn big" data-key=" ">💣</button>
+    <button class="tbtn big" data-key=" ">💣<b id="touch-ammo">3</b></button>
     <button class="tbtn" data-key="ArrowDown">▼</button>
     <button class="tbtn wide" data-key="ArrowRight">▶</button>
   </div>

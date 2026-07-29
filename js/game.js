@@ -127,12 +127,28 @@
      ========================================================= */
 
   Game.prototype.dropBomb = function (p) {
-    if (p.bombs <= 0) { BM.sound.empty(); return false; }
+    if (p.bombs <= 0) {
+      // 空でも「ポケットを探る」動作はさせる。反応が無いと壊れて見える
+      p.throwT = 1;
+      p.emptyT = 0.5;
+      BM.sound.empty();
+      this.fx.text(p.x, p.y - 26, 'ポケットが空', '#ff8a8a', 14);
+      return false;
+    }
     p.bombs--;
-    p.nozzle = 1;
-    this.bombs.push(new BM.Bomb(p.x, p.y + 14, p.power, false));
+    p.throwT = 1;
+    // 腰のポーチから出したように見せるが、掘る列は必ず真下
+    var hx = p.x + 9, hy = p.y + 8;
+    var b = new BM.Bomb(p.x, hy, p.power, false);
+    b.vdx = 9;
+    this.bombs.push(b);
     BM.sound.drop();
-    this.fx.sparkle(p.x, p.y + 16, '#ffd23d');
+    this.fx.sparkle(hx, hy, '#ffd23d');
+    this.fx.spawn(5, {
+      x: hx, y: hy, jitter: 3, speedMin: 20, speedMax: 70,
+      rMin: 1, rMax: 2.4, lifeMin: 0.15, lifeMax: 0.35,
+      drag: 3, gravity: -120, colors: ['#d8c49a', '#8f7a52'], glow: false
+    });
     return true;
   };
 
@@ -601,7 +617,7 @@
     for (var i = 0; i < this.bombs.length; i++) {
       var b = this.bombs[i];
       g.save();
-      g.translate(b.x, b.y);
+      g.translate(b.x + (b.vdx || 0), b.y);
       // 落下の尾
       var tg = g.createLinearGradient(0, -34, 0, 0);
       tg.addColorStop(0, 'rgba(255,160,60,0)');
@@ -657,11 +673,11 @@
     // 残像
     for (var i = 0; i < p.trail.length; i++) {
       var tr = p.trail[i];
-      var a = (1 - tr.t / 0.28) * 0.22 * BM.clamp(p.vy / 400, 0.3, 1);
+      var a = (1 - tr.t / 0.28) * 0.2 * BM.clamp(p.vy / 400, 0.3, 1);
       g.save();
       g.globalAlpha = a;
       g.fillStyle = '#8fd6ff';
-      g.beginPath(); BM.roundRect(g, tr.x - 9, tr.y - 12, 18, 24, 6); g.fill();
+      g.beginPath(); g.ellipse(tr.x, tr.y, 8, 14, 0, 0, 6.3); g.fill();
       g.restore();
     }
 
@@ -678,7 +694,7 @@
       g.strokeStyle = 'rgba(255,90,70,.5)';
       g.lineWidth = 2;
       g.beginPath();
-      g.moveTo(p.x, p.y + 16);
+      g.moveTo(p.x, p.y + 18);
       g.lineTo(p.x, landRow * TILE);
       g.stroke();
       g.restore();
@@ -686,69 +702,206 @@
 
     g.save();
     g.translate(p.x, p.y);
-    g.rotate(p.lean * 0.28);
-    var stretch = 1 + BM.clamp(p.vy / 1400, 0, 0.3);
+    g.rotate(p.lean * 0.3);
 
     if (p.shield > 0) {
       g.save();
       g.globalCompositeOperation = 'lighter';
       g.strokeStyle = 'rgba(140,232,255,' + (0.4 + Math.sin(p.spin * 3) * 0.2).toFixed(2) + ')';
       g.lineWidth = 2.5;
-      g.beginPath(); g.arc(0, 0, 20, 0, 6.3); g.stroke();
+      g.beginPath(); g.arc(0, 0, 21, 0, 6.3); g.stroke();
       g.restore();
     }
 
-    g.scale(1 / stretch, stretch);
+    this.drawFaller(g, p);
+    g.restore();
+  };
 
-    // 安定翼
-    g.fillStyle = '#2c2440';
-    g.beginPath();
-    g.moveTo(-10, 2); g.lineTo(-16, 12); g.lineTo(-9, 11); g.closePath(); g.fill();
-    g.beginPath();
-    g.moveTo(10, 2); g.lineTo(16, 12); g.lineTo(9, 11); g.closePath(); g.fill();
+  /* 落下中の人。
+     ・落ちているので、マフラーも髪も手足も「上へ」流れる
+     ・急降下は頭から突っ込む姿勢に切り替える
+     ・爆弾は腰のポーチから手で取り出す（throwT がその動作の進行） */
+  Game.prototype.drawFaller = function (g, p) {
+    var dive = p.diving;
+    var w = Math.sin(p.flail) * 1;              // ばたつき
+    var lean = p.lean;
+    var SK = '#f0c9a4', SK2 = '#d9a97f';        // 肌
+    var SUIT = '#3f7fb5', SUIT2 = '#25537c';    // つなぎ
+    var SCARF = '#ff5a6e';
 
-    // 胴体（タンク）
-    var bg = g.createLinearGradient(0, -15, 0, 14);
-    bg.addColorStop(0, '#e8ecf6');
-    bg.addColorStop(0.55, '#b9c2d6');
-    bg.addColorStop(1, '#6f7894');
-    g.fillStyle = bg;
-    g.beginPath(); BM.roundRect(g, -10, -14, 20, 27, 7); g.fill();
-    g.strokeStyle = 'rgba(18,12,34,.7)'; g.lineWidth = 1.8; g.stroke();
-
-    // 覗き窓
+    // ---- マフラー（体の後ろ。上へなびく） ----
     g.save();
-    g.beginPath(); BM.roundRect(g, -6.5, -10, 13, 13, 4); g.clip();
-    g.fillStyle = '#140f26'; g.fillRect(-8, -12, 16, 18);
-    g.fillStyle = '#2b6f9e';
-    g.fillRect(-8, -10 + p.lean * 2, 16, 18);
+    g.strokeStyle = SCARF;
+    g.lineWidth = 5;
+    g.lineCap = 'round';
+    g.beginPath();
+    g.moveTo(-1, -8);
+    g.quadraticCurveTo(-6 - lean * 10, -20 + w, -3 - lean * 20, -32 + w * 2);
+    g.stroke();
+    g.lineWidth = 3.5;
+    g.beginPath();
+    g.moveTo(2, -8);
+    g.quadraticCurveTo(8 - lean * 9, -18 - w, 4 - lean * 18, -29 - w * 2);
+    g.stroke();
     g.restore();
 
-    // 単眼レンズ。進行方向＝下を向いている
-    var lx = p.lean * 2.2;
-    g.fillStyle = '#0e0a1c';
-    g.beginPath(); g.arc(lx * 0.5, 6, 6, 0, 6.3); g.fill();
-    var lg = g.createRadialGradient(lx - 1, 4.5, 0.5, lx, 6, 4.5);
-    lg.addColorStop(0, '#ffffff');
-    lg.addColorStop(0.4, '#7fe3ff');
-    lg.addColorStop(1, '#1a6f9e');
-    g.fillStyle = lg;
-    g.beginPath(); g.arc(lx, 6, 4.2, 0, 6.3); g.fill();
-    g.fillStyle = 'rgba(255,255,255,.9)';
-    g.beginPath(); g.arc(lx - 1.3, 4.6, 1.2, 0, 6.3); g.fill();
+    // ---- 脚 ----
+    g.strokeStyle = SUIT2;
+    g.lineWidth = 5.5;
+    g.lineCap = 'round';
+    g.beginPath();
+    if (dive) {
+      g.moveTo(-3, 6); g.quadraticCurveTo(-4, 15, -3 + w * 0.5, 23);
+      g.moveTo(3, 6);  g.quadraticCurveTo(4, 15, 3 - w * 0.5, 23);
+    } else {
+      g.moveTo(-3, 6); g.quadraticCurveTo(-10 - w, 13, -12 + lean * 4, 19 + w);
+      g.moveTo(3, 6);  g.quadraticCurveTo(10 + w, 13, 12 + lean * 4, 18 - w);
+    }
+    g.stroke();
+    // 靴
+    g.fillStyle = '#2a2438';
+    if (dive) {
+      g.beginPath(); g.ellipse(-3 + w * 0.5, 24, 3, 4, 0, 0, 6.3); g.fill();
+      g.beginPath(); g.ellipse(3 - w * 0.5, 24, 3, 4, 0, 0, 6.3); g.fill();
+    } else {
+      g.beginPath(); g.ellipse(-12 + lean * 4, 20 + w, 4, 3, -0.4, 0, 6.3); g.fill();
+      g.beginPath(); g.ellipse(12 + lean * 4, 19 - w, 4, 3, 0.4, 0, 6.3); g.fill();
+    }
 
-    // 射出口（爆弾を落とすと反動で沈む）
-    var nz = p.nozzle > 0 ? p.nozzle * 3 : 0;
-    g.fillStyle = '#39304f';
-    g.beginPath(); BM.roundRect(g, -3.5, 12 - nz, 7, 7, 2.5); g.fill();
+    // ---- 胴 ----
+    var bg = g.createLinearGradient(0, -8, 0, 10);
+    bg.addColorStop(0, SUIT);
+    bg.addColorStop(1, SUIT2);
+    g.fillStyle = bg;
+    g.beginPath();
+    BM.roundRect(g, -7.5, -8, 15, 17, 6);
+    g.fill();
+    g.strokeStyle = 'rgba(12,10,26,.6)'; g.lineWidth = 1.4; g.stroke();
+    // ベルト
+    g.fillStyle = '#2a2438';
+    g.beginPath(); BM.roundRect(g, -8, 3, 16, 3.5, 1.5); g.fill();
+
+    // ---- 腰のポーチ（爆弾入れ）。残数で膨らみが変わる ----
+    var fill = BM.clamp(p.bombs / 4, 0, 1);
+    var pw = 6 + fill * 3;
+    g.save();
+    g.translate(9, 5);
+    g.fillStyle = p.emptyT > 0 ? '#6a4a4a' : '#8a6a3c';
+    g.beginPath(); BM.roundRect(g, -pw / 2, -4, pw, 9, 2.5); g.fill();
+    g.strokeStyle = 'rgba(12,10,26,.6)'; g.lineWidth = 1.2; g.stroke();
+    g.fillStyle = '#c9a463';
+    g.beginPath(); BM.roundRect(g, -pw / 2, -4.5, pw, 3, 1.5); g.fill();
+    if (p.bombs > 0 && p.throwT > 0.55) {
+      // 取り出す瞬間はポーチが光る
+      g.save();
+      g.globalCompositeOperation = 'lighter';
+      g.fillStyle = 'rgba(255,210,80,' + ((p.throwT - 0.55) * 2).toFixed(2) + ')';
+      g.beginPath(); g.arc(0, 0, 9, 0, 6.3); g.fill();
+      g.restore();
+    }
+    g.restore();
+
+    // ---- 腕 ----
+    // throwT: 1 → ポーチに手を入れる、0.5 → 取り出す、0 → 通常
+    var t = p.throwT;
+    g.strokeStyle = SK;
+    g.lineWidth = 4.5;
+    g.lineCap = 'round';
+    g.beginPath();
+    // 左腕（常にバランスを取る）
+    if (dive) { g.moveTo(-6, -4); g.quadraticCurveTo(-10, 4, -8 - w, 12); }
+    else      { g.moveTo(-6, -4); g.quadraticCurveTo(-14 - w, -10, -16 + lean * 5, -18 - w); }
+    g.stroke();
+
+    // 右腕（爆弾を出す側）
+    // throwT: 1.0→0.65 ポーチへ手を伸ばす / 0.65→0.25 取り出して下へ突き出す /
+    //         0.25→0 通常の姿勢へ戻る
+    var hx, hy, ex, ey, holding = false;
+    var restX = dive ? 8 + w : 16 + lean * 5;
+    var restY = dive ? 12 : -18 + w;
+    var pouchX = 9, pouchY = 4;
+    var outX = 13, outY = 18;
+    if (t > 0.65) {
+      var k = (1 - t) / 0.35;                       // 0→1
+      hx = BM.lerp(restX, pouchX, k); hy = BM.lerp(restY, pouchY, k);
+      ex = 11; ey = -2;
+    } else if (t > 0.25) {
+      var k2 = (0.65 - t) / 0.40;                   // 0→1
+      hx = BM.lerp(pouchX, outX, k2); hy = BM.lerp(pouchY, outY, k2);
+      ex = 11; ey = 3;
+      holding = p.emptyT <= 0;
+    } else if (t > 0) {
+      var k3 = 1 - t / 0.25;                        // 0→1
+      hx = BM.lerp(outX, restX, k3); hy = BM.lerp(outY, restY, k3);
+      ex = dive ? 11 : 14; ey = dive ? 6 : -6;
+    } else {
+      hx = restX; hy = restY;
+      ex = dive ? 11 : 14 + w; ey = dive ? 4 : -10;
+    }
+    g.beginPath();
+    g.moveTo(6, -4);
+    g.quadraticCurveTo(ex, ey, hx, hy);
+    g.stroke();
+
+    // 取り出した爆弾を手に持っている
+    if (holding) {
+      g.fillStyle = '#1a1626';
+      g.beginPath(); g.arc(hx, hy, 4.4, 0, 6.3); g.fill();
+      g.strokeStyle = 'rgba(255,180,80,.95)'; g.lineWidth = 1.3; g.stroke();
+      g.strokeStyle = '#c9b28a'; g.lineWidth = 1.4;
+      g.beginPath(); g.moveTo(hx + 2, hy - 4); g.quadraticCurveTo(hx + 5, hy - 8, hx + 3, hy - 10); g.stroke();
+      g.strokeStyle = SK; g.lineWidth = 4.5;
+    }
+    // 空振りしたときは手をひらひらさせる
+    if (p.emptyT > 0 && t > 0.25 && t <= 0.65) {
+      g.strokeStyle = 'rgba(255,140,140,.9)'; g.lineWidth = 1.6;
+      g.beginPath();
+      g.moveTo(hx - 4, hy - 5); g.lineTo(hx + 4, hy - 9);
+      g.moveTo(hx + 4, hy - 5); g.lineTo(hx - 4, hy - 9);
+      g.stroke();
+      g.strokeStyle = SK; g.lineWidth = 4.5;
+    }
+
+    // ---- 頭 ----
+    var hy2 = -14;
+    g.fillStyle = SK;
+    g.beginPath(); g.arc(0, hy2, 7.5, 0, 6.3); g.fill();
+    g.strokeStyle = 'rgba(12,10,26,.55)'; g.lineWidth = 1.3; g.stroke();
+    // 髪（上へ流れる）
+    g.fillStyle = '#4a3728';
+    g.beginPath();
+    g.moveTo(-7.5, hy2 - 1);
+    g.quadraticCurveTo(-9 - lean * 6, hy2 - 11 + w, -2 - lean * 10, hy2 - 9);
+    g.quadraticCurveTo(2, hy2 - 13 - w, 6 - lean * 8, hy2 - 8);
+    g.quadraticCurveTo(8, hy2 - 6, 7.5, hy2 - 1);
+    g.quadraticCurveTo(3, hy2 - 6, 0, hy2 - 6);
+    g.quadraticCurveTo(-3, hy2 - 6, -7.5, hy2 - 1);
+    g.closePath();
+    g.fill();
+    // ゴーグル
+    g.strokeStyle = '#2a2438'; g.lineWidth = 2;
+    g.beginPath(); g.moveTo(-7.5, hy2 - 1); g.lineTo(7.5, hy2 - 1); g.stroke();
+    var gg = g.createLinearGradient(0, hy2 - 4, 0, hy2 + 2);
+    gg.addColorStop(0, '#bff0ff');
+    gg.addColorStop(1, '#3d9fd0');
+    g.fillStyle = gg;
+    g.beginPath(); BM.roundRect(g, -6.5, hy2 - 3.5, 13, 5.5, 2.5); g.fill();
+    g.strokeStyle = 'rgba(12,10,26,.7)'; g.lineWidth = 1.2; g.stroke();
+    g.fillStyle = 'rgba(255,255,255,.8)';
+    g.beginPath(); g.ellipse(-3.5 + lean * 2, hy2 - 1.6, 1.8, 1.2, -0.4, 0, 6.3); g.fill();
+    // 口（急降下は食いしばる）
+    g.strokeStyle = SK2; g.lineWidth = 1.2;
+    g.beginPath();
+    if (dive) { g.moveTo(-2.5, hy2 + 4.5); g.lineTo(2.5, hy2 + 4.5); }
+    else { g.arc(0, hy2 + 3.2, 2.2, 0.25, Math.PI - 0.25); }
+    g.stroke();
 
     if (p.crackHit > 0) {
       g.globalCompositeOperation = 'lighter';
       g.globalAlpha = p.crackHit * 3;
       g.fillStyle = '#ffd7a0';
-      g.beginPath(); g.arc(0, 0, 22, 0, 6.3); g.fill();
+      g.beginPath(); g.arc(0, 0, 24, 0, 6.3); g.fill();
     }
-    g.restore();
   };
 
   /* 右端の深度計。今どこまで来たかが常時見える */

@@ -27,8 +27,10 @@
     this.dir = 0;          // -1 / 0 / 1
     this.lean = 0;
     this.spin = 0;
-    this.nozzle = 0;
+    this.throwT = 0;       // ポケットから爆弾を取り出す動作の進行
+    this.flail = 0;        // 手足のばたつき
     this.diving = false;
+    this.emptyT = 0;       // 空のポケットを探った直後
     this.trail = [];
     this.crackHit = 0;
     this.deepest = 0;
@@ -47,7 +49,9 @@
     var world = game.world;
 
     if (this.slow > 0) this.slow -= dt;
-    if (this.nozzle > 0) this.nozzle -= dt * 4;
+    if (this.throwT > 0) this.throwT = Math.max(0, this.throwT - dt * 2.6);
+    if (this.emptyT > 0) this.emptyT -= dt;
+    this.flail += dt * (3 + this.vy / 120);
 
     // ---- 横 ----
     var ix = (K['ArrowRight'] || K['d'] ? 1 : 0) - (K['ArrowLeft'] || K['a'] ? 1 : 0);
@@ -129,6 +133,9 @@
     this.id = nextId++;
     this.x = x;
     this.y = y;
+    // 見た目だけポーチの位置から出す。掘る列がずれると理不尽になるので、
+    // 判定用の x は常に真下のまま。描画時にこのオフセットを足して戻していく。
+    this.vdx = 0;
     this.vy = BM.BOMB_FALL_V;
     this.power = power;
     this.t = 0;
@@ -139,6 +146,7 @@
 
   Bomb.prototype.update = function (dt, game) {
     this.t += dt;
+    if (this.vdx !== 0) this.vdx = BM.damp(this.vdx, 0, 14, dt);
     var steps = Math.max(1, Math.ceil(this.vy * dt / 10));
     for (var s = 0; s < steps; s++) {
       this.y += this.vy * dt / steps;
