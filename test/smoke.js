@@ -55,7 +55,10 @@ function chromiumPath() {
     state: BM.game.state, stage: BM.game.stage, score: BM.game.score,
     enemies: BM.game.enemies.length, bombs: BM.game.bombs.length,
     blocks: BM.game.map.blockCells().length,
-    lives: BM.game.players[0] && BM.game.players[0].lives
+    lives: BM.game.players[0] && BM.game.players[0].lives,
+    ink: Math.round(BM.game.myRatio * 100) + '%',
+    foe: Math.round(BM.game.foeRatio * 100) + '%',
+    target: Math.round(BM.game.targetRatio * 100) + '%'
   }));
   const check = (label, cond) => {
     console.log((cond ? '  ok   ' : '  FAIL ') + label);
@@ -75,6 +78,10 @@ function chromiumPath() {
   check('プレイ状態になる', s.state === 'play');
   check('敵が湧いている', s.enemies > 0);
   check('ソフトブロックがある', s.blocks > 10);
+  check('出口が最初から盤上にある', await page.evaluate(() => !!BM.game.door));
+  check('ノルマ未達なら出口は閉じている',
+    await page.evaluate(() => BM.game.myRatio < BM.game.targetRatio && !BM.game.door.open));
+  check('スタート地点が自陣として塗られている', await page.evaluate(() => BM.game.map.inkAt(1, 1) === 1));
 
   // ---- 実際にキー入力で歩いて爆弾を置く ----
   await page.evaluate(() => {
@@ -95,6 +102,24 @@ function chromiumPath() {
   console.log('  プレイ後:', JSON.stringify(s2));
   check('爆弾でブロックが壊れている', s2.blocks < s.blocks);
   check('スコアが入っている', s2.score > 0);
+  check('爆風で床が塗れている', parseInt(s2.ink) > parseInt(s.ink));
+  check('敵が床を敵色に汚している', parseInt(s2.foe) > 0);
+
+  // 自陣インクの上では速く、敵陣では遅くなるか
+  const speeds = await page.evaluate(() => {
+    const g = BM.game, p = g.players[0];
+    const cx = BM.cellOf(p.x), cy = BM.cellOf(p.y);
+    const save = g.map.inkAt(cx, cy);
+    const out = {};
+    g.map.ink[cy * BM.COLS + cx] = 1; out.mine = p.speed(g);
+    g.map.ink[cy * BM.COLS + cx] = 2; out.foe = p.speed(g);
+    g.map.ink[cy * BM.COLS + cx] = 0; out.neutral = p.speed(g);
+    g.map.ink[cy * BM.COLS + cx] = save;
+    return out;
+  });
+  console.log('  速度 自陣/中立/敵陣:', speeds.mine.toFixed(0), speeds.neutral.toFixed(0), speeds.foe.toFixed(0));
+  check('自陣は中立より速い', speeds.mine > speeds.neutral);
+  check('敵陣は中立より遅い', speeds.foe < speeds.neutral);
 
   // ---- 連鎖爆発 ----
   await page.evaluate(() => {
@@ -113,16 +138,22 @@ function chromiumPath() {
   await shot('03-boom.png');
   await page.waitForTimeout(900);
 
-  // ---- 出口 → ステージクリア ----
+  // ---- ノルマ塗り率 → 出口が開く ----
+  check('出口の開閉はノルマ塗り率と一致している',
+    await page.evaluate(() => BM.game.door.open === (BM.game.myRatio >= BM.game.targetRatio)));
   await page.evaluate(() => {
+    // ブロックを全部壊してから盤面を自陣色で塗り、ノルマ達成状態を作る
     const g = BM.game;
     g.enemies.length = 0;
-    for (const k in g.hidden) {
-      if (g.hidden[k].door) { const n = Number(k); g.breakBlock(n % BM.COLS, Math.floor(n / BM.COLS), g.players[0]); break; }
+    for (let y = 1; y < BM.ROWS - 1; y++) {
+      for (let x = 1; x < BM.COLS - 1; x++) {
+        if (g.map.isBlock(x, y)) g.map.set(x, y, BM.T_EMPTY);
+        g.map.paint(x, y, 1);
+      }
     }
   });
-  await page.waitForTimeout(600);
-  check('敵全滅で出口が開く', await page.evaluate(() => !!(BM.game.door && BM.game.door.open)));
+  await page.waitForTimeout(700);
+  check('ノルマ達成で出口が開く', await page.evaluate(() => !!(BM.game.door && BM.game.door.open)));
   await shot('04-door.png');
 
   await page.evaluate(() => {
@@ -156,11 +187,26 @@ function chromiumPath() {
   await page.click('button[data-act="vs"]');
   await page.waitForTimeout(600);
   check('2P が生成される', await page.evaluate(() => BM.game.players.length === 2));
+  check('2P の陣地が最初から塗られている', await page.evaluate(() => BM.game.map.inkAt(BM.COLS - 2, BM.ROWS - 2) === 2));
   await shot('07-vs.png');
+
+  // 対戦では「やられた＝即敗北」ではなく、スタンして陣地が削れるだけ
   await page.evaluate(() => BM.game.hurtPlayer(BM.game.players[1]));
-  await page.waitForTimeout(400);
-  const vs = await page.evaluate(() => ({ state: BM.game.state, w1: BM.game.players[0].wins }));
-  check('決着でラウンド結果が出る', vs.state === 'vsround' && vs.w1 === 1);
+  await page.waitForTimeout(200);
+  const downed = await page.evaluate(() => ({ state: BM.game.state, stun: BM.game.players[1].stun }));
+  check('ダウンしてもラウンドは続く', downed.state === 'play' && downed.stun > 0);
+
+  // 1P が優勢な状態で時間切れにする → 塗り面積で決着
+  await page.evaluate(() => {
+    const g = BM.game;
+    for (let y = 1; y < BM.ROWS - 1; y++)
+      for (let x = 1; x < 8; x++)
+        if (!g.map.isBlock(x, y)) g.map.paint(x, y, 1);
+    g.timeLeft = 0.05;
+  });
+  await page.waitForTimeout(500);
+  const vs = await page.evaluate(() => ({ state: BM.game.state, w1: BM.game.players[0].wins, w2: BM.game.players[1].wins }));
+  check('時間切れの塗り面積で1Pがラウンド獲得', vs.state === 'vsround' && vs.w1 === 1 && vs.w2 === 0);
   await shot('08-vsround.png');
 
   // ---- フレームレート ----

@@ -76,6 +76,13 @@
       el.life = document.getElementById('hud-life');
       el.power = document.getElementById('hud-power');
       el.combo = document.getElementById('combo-banner');
+      el.inkbar = document.getElementById('inkbar');
+      el.ink1 = document.getElementById('ink-1');
+      el.ink2 = document.getElementById('ink-2');
+      el.inkTarget = document.getElementById('ink-target');
+      el.inkNum1 = document.getElementById('ink-num-1');
+      el.inkNum2 = document.getElementById('ink-num-2');
+      el.inkCaption = document.getElementById('ink-caption');
     },
 
     hide: function () { el.overlay.classList.add('hidden'); },
@@ -109,6 +116,25 @@
       el.time.textContent = t;
       el.time.classList.toggle('warn', t <= 15);
 
+      // 塗り面積バー
+      var r1 = Math.round(g.myRatio * 100), r2 = Math.round(g.foeRatio * 100);
+      el.ink1.style.width = r1 + '%';
+      el.ink2.style.width = r2 + '%';
+      el.inkNum1.textContent = r1 + '%';
+      el.inkNum2.textContent = r2 + '%';
+      if (g.mode === 'vs') {
+        el.inkbar.classList.remove('has-target', 'reached');
+        el.inkCaption.textContent = '塗り面積で勝負';
+      } else {
+        el.inkbar.classList.add('has-target');
+        el.inkTarget.style.left = (g.targetRatio * 100) + '%';
+        var done = g.myRatio >= g.targetRatio;
+        el.inkbar.classList.toggle('reached', done);
+        el.inkCaption.textContent = done
+          ? '出口が開いた'
+          : 'ノルマ ' + Math.round(g.targetRatio * 100) + '%';
+      }
+
       if (g.mode === 'vs') {
         el.stage.textContent = 'VS';
         var p1 = g.players[0], p2 = g.players[1];
@@ -140,10 +166,10 @@
     showTitle: function (g) {
       this.show(
         '<h1>BLAST RUSH</h1>' +
-        '<div class="sub">爆風は連鎖する。逃げ場は自分で作れ。</div>' +
+        '<div class="sub">爆風は、武器じゃない。<b style="color:#7fe4ff">絵筆だ。</b></div>' +
         '<div class="menu">' +
-        '<button data-act="solo">▶ ひとりで遊ぶ<small>ステージ攻略モード / 敵を全滅させて出口へ</small></button>' +
-        '<button data-act="vs">⚔ 2人で対戦<small>同じキーボードで先に3勝したほうが勝ち</small></button>' +
+        '<button data-act="solo">▶ ひとりで塗る<small>爆風で床を塗り、ノルマ達成で出口が開く</small></button>' +
+        '<button data-act="vs">⚔ 2人で塗り合い<small>時間切れ時点で塗り面積の広いほうがラウンド勝ち</small></button>' +
         '<button data-act="how">📖 あそびかた</button>' +
         '</div>' +
         '<div class="tips">ハイスコア <b>' + g.bestScore.toLocaleString('en-US') + '</b></div>'
@@ -156,14 +182,22 @@
         '<div class="tips" style="text-align:left;font-size:12.5px">' +
         '<p><b>1P</b> <code>←↑↓→</code> 移動 / <code>Space</code> 爆弾 / <code>Enter</code> リモコン起爆<br>' +
         '<b>2P</b> <code>W A S D</code> 移動 / <code>F</code> 爆弾 / <code>G</code> リモコン起爆</p>' +
+        '<p><b style="color:#7fe4ff">このゲームの勝敗は「倒した数」ではなく「塗った面積」で決まる。</b><br>' +
+        '爆風が通った床は自分の色に染まる。1人用はノルマ塗り率で出口が開き、' +
+        '対戦は時間切れ時点の面積で勝敗が決まる。</p>' +
+        '<p><b>自分の色の床は速く走れて、相手の色の床では遅くなる。</b><br>' +
+        '塗る → 動きやすくなる → もっと塗れる、の好循環をどれだけ早く回せるかが勝負。<br>' +
+        'やられると足元の自陣が中立に戻るので、死ぬこと自体が失点になる。</p>' +
         '<p>爆弾は約2.2秒で十字に爆発。爆風は硬い壁で止まり、ソフトブロックを1枚壊す。<br>' +
-        '爆風に触れた爆弾は<b>誘爆</b>する。連鎖させるほどスコア倍率とスクリーンが荒ぶる。</p>' +
+        '爆風に触れた爆弾は<b>誘爆</b>する。連鎖させるほど一度に塗れる面積が跳ね上がる。<br>' +
+        '敵を倒すと、その場に自分のインクが飛び散る。</p>' +
         '<p><b>アイテム</b><br>' +
         '🔥 火力アップ ／ 💣 爆弾の数 ／ ⚡ スピード<br>' +
         '🦵 キック（爆弾を蹴って飛ばす） ／ ✴ 貫通爆弾（ブロックを貫く）<br>' +
         '📡 リモコン（起爆キーで好きなタイミングに） ／ 🛡 シールド ／ ♥ 残機 ／ ☀ フルファイア</p>' +
-        '<p>床がうっすら赤いマスは<b>これから爆風が来る場所</b>。ここを読めば死なない。<br>' +
-        '敵を全滅させると出口が開く。時間切れになると敵が暴走するので注意。</p>' +
+        '<p>床が赤く点滅しているマスは<b>これから爆風が来る場所</b>。ここを読めば死なない。<br>' +
+        '敵は歩いた跡を敵色に汚していくので、放置すると塗り率がじりじり削られる。<br>' +
+        '時間切れになると敵が暴走するので注意。</p>' +
         '</div>' +
         '<div class="menu"><button data-act="back">◀ もどる</button></div>'
       );
@@ -173,8 +207,11 @@
       this.show(
         '<h2>STAGE ' + g.stage + ' CLEAR!</h2>' +
         '<div class="rows">' +
-        '<div class="stat">タイムボーナス <b>' + (Math.floor(g.timeLeft) * 10).toLocaleString('en-US') + '</b></div>' +
-        '<div class="stat">残機ボーナス <b>' + (Math.max(0, g.players[0].lives) * 200).toLocaleString('en-US') + '</b></div>' +
+        '<div class="stat">最終塗り率 <b style="color:#7fe4ff">' + Math.round(g.clearRatio * 100) + '%</b>' +
+        ' <span style="opacity:.6">/ ノルマ ' + Math.round(g.targetRatio * 100) + '%</span></div>' +
+        '<div class="stat">塗りボーナス <b>' + g.bonusInk.toLocaleString('en-US') + '</b></div>' +
+        '<div class="stat">タイムボーナス <b>' + g.bonusTime.toLocaleString('en-US') + '</b></div>' +
+        '<div class="stat">残機ボーナス <b>' + g.bonusLife.toLocaleString('en-US') + '</b></div>' +
         '<div class="stat">SCORE <b>' + g.score.toLocaleString('en-US') + '</b></div>' +
         '</div>' +
         '<div class="menu"><button data-act="next">▶ STAGE ' + (g.stage + 1) + ' へ</button></div>' +
@@ -205,11 +242,19 @@
       var head;
       if (done) head = '<h2>' + (p1.wins >= 3 ? '1P' : '2P') + ' の勝利！</h2>';
       else if (g.roundWinner) head = '<h2>' + g.roundWinner.name + ' がラウンド獲得</h2>';
-      else head = '<h2>相討ち / 時間切れ</h2>';
+      else head = '<h2>引き分け</h2>';
+
+      var c = g.finalCounts || { 1: 0, 2: 0, total: 1 };
+      var pc = function (n) { return Math.round(n / (c.total || 1) * 100) + '%'; };
 
       this.show(
         head +
-        '<div class="rows"><div class="stat">1P <b>' + p1.wins + '</b> — <b>' + p2.wins + '</b> 2P</div></div>' +
+        '<div class="rows">' +
+        '<div class="stat">塗り面積 ' +
+        '<b style="color:#5ad2ff">1P ' + pc(c[1]) + '</b> — ' +
+        '<b style="color:#ff7ac8">' + pc(c[2]) + ' 2P</b></div>' +
+        '<div class="stat">ラウンド 1P <b>' + p1.wins + '</b> — <b>' + p2.wins + '</b> 2P</div>' +
+        '</div>' +
         '<div class="menu">' +
         (done ? '<button data-act="vs">↻ もう一度</button>' : '<button data-act="nextround">▶ 次のラウンド</button>') +
         '<button data-act="title">◀ タイトルへ</button>' +

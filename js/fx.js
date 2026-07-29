@@ -55,8 +55,9 @@
   };
 
   FX.prototype.text = function (x, y, str, color, size, vy) {
+    // 連鎖中は同じ場所に何枚も出るので、少しずらして重なりを散らす
     this.texts.push({
-      x: x, y: y, s: str, t: 0, life: 0.9,
+      x: x + BM.rand(-9, 9), y: y + BM.rand(-5, 5), s: str, t: 0, life: 0.9,
       color: color || '#ffe14d', size: size || 15, vy: vy == null ? -46 : vy
     });
   };

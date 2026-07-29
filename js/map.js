@@ -8,9 +8,49 @@
     this.w = BM.COLS;
     this.h = BM.ROWS;
     this.tiles = new Uint8Array(this.w * this.h);
-    this.blockHp = new Float32Array(this.w * this.h); // 破壊アニメ用
+    this.ink = new Uint8Array(this.w * this.h);       // 0=中立 / 1=1P / 2=2P・敵
+    this.inkT = new Float32Array(this.w * this.h);    // 塗られてからの経過（にじみアニメ）
     this.decor = new Float32Array(this.w * this.h);   // 見た目のバリエーション
+    this.paintable = 0;                               // 壁以外のマス数（分母）
   }
+
+  /* ---------- インク ---------- */
+  GameMap.prototype.inkAt = function (cx, cy) {
+    if (cx < 0 || cy < 0 || cx >= this.w || cy >= this.h) return BM.INK_NONE;
+    return this.ink[cy * this.w + cx];
+  };
+
+  /* 塗れたら true。壁とソフトブロックの上は塗れない。 */
+  GameMap.prototype.paint = function (cx, cy, team) {
+    if (cx < 0 || cy < 0 || cx >= this.w || cy >= this.h) return false;
+    var i = cy * this.w + cx;
+    if (this.tiles[i] !== BM.T_EMPTY) return false;
+    var was = this.ink[i];
+    this.ink[i] = team;
+    this.inkT[i] = 0;
+    return was !== team;
+  };
+
+  GameMap.prototype.inkCounts = function () {
+    var a = 0, b = 0;
+    for (var i = 0; i < this.ink.length; i++) {
+      if (this.tiles[i] === BM.T_WALL) continue;
+      if (this.ink[i] === 1) a++;
+      else if (this.ink[i] === 2) b++;
+    }
+    return { 1: a, 2: b, total: this.paintable };
+  };
+
+  GameMap.prototype.ratio = function (team) {
+    if (!this.paintable) return 0;
+    return this.inkCounts()[team] / this.paintable;
+  };
+
+  GameMap.prototype.tickInk = function (dt) {
+    for (var i = 0; i < this.inkT.length; i++) {
+      if (this.inkT[i] < 1) this.inkT[i] += dt;
+    }
+  };
 
   GameMap.prototype.at = function (cx, cy) {
     if (cx < 0 || cy < 0 || cx >= this.w || cy >= this.h) return BM.T_WALL;
@@ -32,12 +72,15 @@
   /* spawnClear: 開始地点まわりを空けるセルの配列 */
   GameMap.prototype.generate = function (density, spawnClear) {
     var x, y, i;
+    this.paintable = 0;
     for (y = 0; y < this.h; y++) {
       for (x = 0; x < this.w; x++) {
         i = y * this.w + x;
         this.tiles[i] = this.isFixedWall(x, y) ? BM.T_WALL : BM.T_EMPTY;
         this.decor[i] = Math.random();
-        this.blockHp[i] = 1;
+        this.ink[i] = BM.INK_NONE;
+        this.inkT[i] = 1;
+        if (this.tiles[i] !== BM.T_WALL) this.paintable++;
       }
     }
     var safe = {};

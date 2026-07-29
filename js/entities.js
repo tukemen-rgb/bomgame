@@ -52,6 +52,7 @@
     this.color = opts.color;
     this.color2 = opts.color2;
     this.name = opts.name;
+    this.team = opts.team;
     this.controls = opts.controls;
     this.radius = TILE * 0.34;
 
@@ -74,15 +75,31 @@
     this.trail = [];
     this.hitFlash = 0;
     this.wins = 0;
+    this.stun = 0;
+    this.onInk = BM.INK_NONE;
+    this.inkStreak = 0;
   }
 
-  Player.prototype.speed = function () {
-    return BM.BASE_SPEED + this.speedLv * BM.SPEED_STEP;
+  /* 自陣のインクの上は速く、敵陣の上は遅い。
+     これが「塗る → 動きやすくなる → さらに塗れる」の好循環を作る。 */
+  Player.prototype.speed = function (game) {
+    var base = BM.BASE_SPEED + this.speedLv * BM.SPEED_STEP;
+    if (!game) return base;
+    var ink = game.map.inkAt(BM.cellOf(this.x), BM.cellOf(this.y));
+    this.onInk = ink;
+    if (ink === this.team) return base * (1 + BM.INK_SPEED_BONUS);
+    if (ink !== BM.INK_NONE) return base * (1 + BM.INK_SPEED_PENALTY);
+    return base;
   };
 
   Player.prototype.update = function (dt, game) {
     if (!this.alive) return;
     if (this.invuln > 0) this.invuln -= dt;
+    if (this.stun > 0) {
+      this.stun -= dt;
+      this.walkT += dt * 18;
+      return;
+    }
     if (this.hitFlash > 0) this.hitFlash -= dt;
     if (this.bombCooldown > 0) this.bombCooldown -= dt;
     this.squash = BM.damp(this.squash, 0, 12, dt);
@@ -98,7 +115,7 @@
     } else if (ix !== 0) BM.input.axisPriority[this.id] = 'x';
     else if (iy !== 0) BM.input.axisPriority[this.id] = 'y';
 
-    var sp = this.speed() * dt;
+    var sp = this.speed(game) * dt;
     var moved = false;
     if (ix !== 0) {
       this.dir = ix > 0 ? 'right' : 'left';
@@ -112,11 +129,20 @@
 
     if (moved) {
       this.walkT += dt * (6 + this.speedLv * 1.1);
-      if (this.speedLv >= 3) {
+      var fast = this.onInk === this.team;
+      if (this.speedLv >= 3 || fast) {
         this.trail.push({ x: this.x, y: this.y, t: 0 });
         if (this.trail.length > 10) this.trail.shift();
       }
-      if (Math.random() < dt * 12) BM.fx.dust(this.x, this.y + TILE * 0.32);
+      if (fast && Math.random() < dt * 22) {
+        // 自陣を走るとインクが跳ねる
+        BM.fx.spawn(1, {
+          x: this.x, y: this.y + TILE * 0.28, jitter: 5,
+          speedMin: 20, speedMax: 70, rMin: 1.2, rMax: 2.6,
+          lifeMin: 0.2, lifeMax: 0.4, drag: 2.4, gravity: 240,
+          colors: [BM.TEAMS[this.team].ink, '#ffffff'], glow: false
+        });
+      } else if (Math.random() < dt * 12) BM.fx.dust(this.x, this.y + TILE * 0.32);
     } else {
       this.walkT = BM.damp(this.walkT, Math.round(this.walkT), 10, dt);
     }
@@ -181,6 +207,8 @@
     this.power = 2;
     this.pierce = false;
     this.spawnFade = 0.45;
+    this.team = BM.ENEMY_TEAM;
+    this.stainT = Math.random() * BM.STAIN_INTERVAL;
   }
 
   Enemy.prototype.speed = function () {
@@ -203,6 +231,22 @@
     this.bob += dt * 5;
 
     var cx = BM.cellOf(this.x), cy = BM.cellOf(this.y);
+
+    // 歩いた跡を敵チームの色に汚していく。放置すると塗り率がじりじり削られる。
+    this.stainT -= dt;
+    if (this.stainT <= 0) {
+      this.stainT = BM.STAIN_INTERVAL;
+      if (game.map.paint(cx, cy, this.team)) {
+        game.onPainted(this.team, 1, this.x, this.y, null);
+        BM.fx.spawn(2, {
+          x: this.x, y: this.y + 8, jitter: 7,
+          speedMin: 8, speedMax: 40, rMin: 1.2, rMax: 2.4,
+          lifeMin: 0.2, lifeMax: 0.45, drag: 2.6, gravity: 120,
+          colors: [BM.TEAMS[this.team].ink], glow: false
+        });
+      }
+    }
+
     var atCenter = Math.abs(this.x - BM.centerOf(cx)) < 1.2 && Math.abs(this.y - BM.centerOf(cy)) < 1.2;
 
     if (!this.target || atCenter) {
@@ -309,6 +353,7 @@
     this.x = BM.centerOf(cx);
     this.y = BM.centerOf(cy);
     this.owner = owner;
+    this.team = owner.team;
     this.power = owner.power;
     this.pierce = !!owner.pierce;
     this.remote = !!owner.remote;

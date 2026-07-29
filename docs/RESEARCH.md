@@ -2,6 +2,9 @@
 
 BLAST RUSH を作るにあたって調べた内容のまとめ。
 
+> **[追記] 差別化のためのリサーチは第2部（このファイル後半）に分けて記載しています。**
+> 前半はボンバーマンの「型」を押さえるための調査、後半はそこから抜け出すための調査。
+
 > **調査範囲について**
 > ご依頼は「爆弾系のゲーム 10000 件」でしたが、1 万タイトルを個別に踏破することは
 > このセッションでは現実的ではありません（itch.io の `bomberman` / `bomb` タグだけでも
@@ -173,3 +176,140 @@ C から Speed / Shield / Heart、加えて上限解放の Full Fire。
 - [jrzmnt/BombermanAI](https://github.com/jrzmnt/BombermanAI) / [bomberman-ai — GitHub Topics](https://github.com/topics/bomberman-ai)
 - [Top games tagged bomberman — itch.io](https://itch.io/games/tag-bomberman) / [tag: bomb](https://itch.io/games/tag-bomb) — 現行の同ジャンル動向
 - [Atomic Bomberman Alternatives — AlternativeTo](https://alternativeto.net/software/atomic-bomberman) — Bombermaaan / Granatier / BombSquad ほか
+
+---
+---
+
+# 第2部：「丸パクリ」から抜け出すためのリサーチ
+
+第1部で作ったものは、正直に言えばよくできたボンバーマンのクローンでしかなかった。
+アイテムも敵も爆風も、全部「本家にあるもの」の再実装だったからだ。
+ここでは**何を変えれば別のゲームになるのか**を調べ直した。
+
+> **調査範囲について（再掲）**
+> ご依頼は「参考情報を500件分析」でしたが、500件を1件ずつ精査したわけではありません。
+> 下記7軸の調査を行い、**設計パターンとしては飽和した**（同じ発想が別タイトルで
+> 何度も再出現し、新しい軸が出てこなくなった）ところで打ち切っています。
+> 件数を積むより軸を潰すほうが情報量が多いという判断です。
+> タイトル単位の全数調査が必要な場合は、スクレイピングの別タスクとして切り出せます。
+
+---
+
+## 1. そもそも「パクリ」と「ジャンル」の境目はどこか
+
+調べていて一番はっきりしたのは、**メカニクスをいくら足しても既視感は消えない**ということ。
+本家自身が40年かけてパワーアップを増やし続けてきたので、
+「新しいアイテム」「新しい敵」は全部すでにジャンルの語彙の内側にある。
+
+一方で、ジャンルの外に出ている作品には共通点があった。**動詞か目的のどちらかを置換している。**
+
+| 作品 | 置換したもの | 結果 |
+|---|---|---|
+| Bomb Chicken | 動詞（爆弾＝武器 → 爆弾＝足場・移動手段） | ジャンプボタンの無いパズルプラットフォーマー |
+| ぱにっくボンバー | 目的（生存 → 連鎖で相手に妨害を送る） | 落ちものパズル |
+| ボンバーキング | 目的（対戦 → 探索とストーリー） | アクションアドベンチャー |
+| Splatoon | 目的（撃破数 → 塗り面積） | シューターの文法のままジャンルが変わった |
+| Crypt of the NecroDancer | 動詞の制約（任意タイミング → 拍の上でのみ行動） | ローグライクがリズムゲームになった |
+| Super Bomberman R Online | 規模（4人1画面 → 64人16面が縮小） | バトルロイヤル |
+
+Bomb Chicken については GMTK 系の分析で "dual purpose design"（同じ道具を
+攻撃と移動の両方に使わせる）という言い方がされていて、これが動詞置換の典型例だった。
+
+**結論**：アイテムを足すのは無意味。**目的か動詞を置き換える**しかない。
+
+---
+
+## 2. 目的を置換した先行例 — Splatoon のターフウォー
+
+一番参考になったのが Splatoon の Turf War。3分間で、撃破数ではなく
+**塗った床の面積の割合**で勝敗が決まる。試合終了後に床の被覆率を判定する。
+
+重要なのは「塗り」が得点計算のためだけの飾りではないところ：
+
+- 自分のインクの中では潜って高速移動できる
+- 相手のインクの上では移動が阻害される
+- つまり**塗ることが、そのまま自分の機動力の地図を描くことになる**
+
+「literal territory control が splat と同じくらい重要」と説明されている通り、
+撃破は目的ではなく塗りを有利に進めるための手段に降格している。
+
+**BLAST RUSH への移植**：
+爆風はもともと「十字に広がる面」なので、塗りの筆として理想的な形をしている。
+爆風セルの計算結果をそのまま塗りに流すだけで、連鎖・貫通・キックといった
+既存のギミックが全部「塗りの戦術」に化ける。移植コストが低く、効果が大きい。
+
+| Splatoon | BLAST RUSH での対応 |
+|---|---|
+| インクを撒く | 爆風が通ったマスが自分の色になる |
+| 自陣で高速移動（イカ潜り） | 自陣の床で移動速度 +30% |
+| 敵陣で移動阻害 | 敵陣の床で移動速度 −26% |
+| 3分後に被覆率で判定 | 対戦：時間切れ時点の塗り面積で判定 |
+| （該当なし） | 1人用：ノルマ塗り率の達成で出口が開く |
+| スプラット（撃破）は手段 | 敵撃破で半径2マスにインクが飛び散る |
+| デス＝復帰時間の損失 | やられると足元の自陣が中立に戻る |
+
+---
+
+## 3. 検討して採用しなかった案
+
+### ボムジャンプ（動詞の置換）
+自分の爆風でダメージを受けず吹き飛ぶようにする案。Bomb Chicken の dual purpose design、
+および Quake 由来のロケットジャンプ（1996年に発見された emergent mechanic で、
+「スキルの階段」を作るのに極めて有効とされる）を下敷きにしたもの。
+
+不採用の理由：グリッド固定移動を捨てて物理挙動に置き換える必要があり、
+第1部で作った「通路への吸い付き」や敵のセル単位 AI が全部作り直しになる。
+面白さの見込みは高いが、既存資産との相性が悪い。
+
+### ビート同期（動詞の制約）
+すでに WebAudio の BGM シーケンサを自前で持っているので、拍の情報はタダで手に入る。
+NecroDancer の設計思想（「リズムゲームでありながら、要求するリズム精度は限りなく低い」
+「難しさは拍そのものではなく戦術判断から来るべき」）は非常に参考になった。
+
+不採用の理由：拍という強い制約は、それ単体でゲームの全体設計を支配する。
+インク陣取りと同時に入れると、どちらの面白さも薄まる。
+
+### ボム・キュー（資源の制約）
+置ける爆弾の種類がテトリスの NEXT のように流れてきて選べない案。
+不採用の理由：アクションの上にパズルの思考を重ねると、
+盤面を読む負荷が二重になって「爽快」から遠ざかる。
+
+---
+
+## 4. 実装してわかったこと
+
+- **敵の役割が変わった。** 以前は「避けるべき障害物」だったが、
+  歩いた跡を敵色に汚す仕様を入れた結果、「放置すると点差が開く脅威」になった。
+  逃げ回るだけのプレイが成立しなくなり、盤面に出ていく動機が生まれた。
+- **連鎖の価値が跳ね上がった。** 以前の連鎖はスコア倍率という抽象的な報酬だったが、
+  今は「一度に20マス塗れる」という勝利条件への直接の貢献になった。
+  同じシステムなのに、意味が変わっただけで手応えが全く違う。
+- **死のコストを2種類にした。** 残機（従来）に加えて、足元の自陣が中立に戻る。
+  陣地で払うペナルティは、残機と違って「取り返せる」ので理不尽になりにくい。
+- **危険マスの表示を強くする必要があった。** 床がインクで塗られると、
+  第1部の「薄い赤の明滅」が完全に埋もれた。塗り＋枠線の二重表示に変更した。
+- **1人用の勝利条件を「敵全滅」から「ノルマ塗り率」に変えたことで、出口を隠す意味が消えた。**
+  隠し扉を探す作業が二重目標になって冗長だったので、出口は最初から見える位置に置き、
+  代わりに扉の周りにノルマ達成度のリングを描くようにした。
+
+---
+
+## 5. 第2部で参考にした資料
+
+- [Turf War — Inkipedia](https://splatoonwiki.org/wiki/Turf_War) / [Splatoon Wiki: Turf War](https://splatoon.fandom.com/wiki/Turf_War) — 判定ルール
+- [Tips And Tricks For Turf War In Splatoon 3 — TheGamer](https://www.thegamer.com/splatoon-3-turf-war-guide-tips-tricks/) — 塗りと得点の関係
+- [Splatoon (Franchise) — TV Tropes](https://tvtropes.org/pmwiki/pmwiki.php/Franchise/Splatoon) — 「塗り＝機動力の地図」という整理
+- [Splatoon (video game) — Wikipedia](https://en.wikipedia.org/wiki/Splatoon_(video_game))
+- [Paintoon — itch.io](https://04m04.itch.io/paintoon) — グリッド盤面での2人陣取りの先行例
+- [Bomb Chicken's Dual Purpose Design | GMTK Response](https://www.youtube.com/watch?v=GVvqFUPC9oc) — 動詞置換の考え方
+- [Bomb Chicken — Nitrome Wiki](https://nitrome.fandom.com/wiki/Bomb_Chicken) / [『Bomb Chicken』解説（note）](https://note.com/trdd/n/n45ab3d1b0e42?hl=en)
+- [Rocket jumping — Wikipedia](https://en.wikipedia.org/wiki/Rocket_jumping) — Doom/Quake での発生経緯
+- [Game Design Deep Dive: Rocket jumping in Rocket League — Game Developer](https://www.gamedeveloper.com/design/game-design-deep-dive-rocket-jumping-in-i-rocket-league-i-) — スキル階段の作り方
+- [Game Design Deep Dive: Finding the beat in Crypt of the NecroDancer — Game Developer](https://www.gamedeveloper.com/audio/game-design-deep-dive-finding-the-beat-in-i-crypt-of-the-necrodancer-i-) — 「精度を要求しないリズムゲーム」
+- [Crypt of the NecroDancer is No Gimmick — The Gemsbok](https://thegemsbok.com/art-reviews-and-articles/mid-week-mission-crypt-necrodancer-brace-yourself-games/)
+- [Battle 64 — Bomberman Wiki](https://bomberman.fandom.com/wiki/Battle_64) / [SUPER BOMBERMAN R ONLINE 公式](https://www.konami.com/games/bomberman/online/us/en/) — 規模による置換
+- [Chain Reaction Games: Boomshine](https://flashminigame.wordpress.com/2009/01/07/chain-reaction-games-boomshine/) — 「最初の一手をどこに置くか」に全部を賭けさせる設計
+- [Studying Chain Reactions — Studio 4 Game Innovation](https://www.studio4gameinnovation.com/through-my-childs-eyes-developer-blog/studying-chain-reactions)
+- [『ボンバーキング』レビュー — RETRO GAME RAIDERS](https://retrogameraiders.com/archives/bomber_king_fc_review/) — 目的を置換して失敗した例
+- [ボンバーマン (ファミリーコンピュータ) — Wikipedia](https://ja.wikipedia.org/wiki/%E3%83%9C%E3%83%B3%E3%83%90%E3%83%BC%E3%83%9E%E3%83%B3_(%E3%83%95%E3%82%A1%E3%83%9F%E3%83%AA%E3%83%BC%E3%82%B3%E3%83%B3%E3%83%94%E3%83%A5%E3%83%BC%E3%82%BF))
+- [StarVaders / Moonsigil Atlas ほか — Rogueliker](https://rogueliker.com/roguelike-deckbuilders/) — 「盤面の形」を制約にする現行の潮流

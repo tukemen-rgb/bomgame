@@ -36,6 +36,26 @@ BM.ITEMS = {
   SHIELD: { key:'SHIELD', label:'シールド',     glyph:'🛡', color:'#a0f0ff' }
 };
 
+/* ---------- インク（陣取り） ----------
+   このゲームの主役。爆風は「攻撃」であると同時に「塗り」であり、
+   勝敗もスコアも塗った面積で決まる。 */
+BM.INK_NONE = 0;
+BM.TEAMS = {
+  1: { id: 1, name: '1P',  ink: '#3fd0ff', deep: '#0f7fb0', glow: '90,210,255' },
+  2: { id: 2, name: '2P',  ink: '#ff6fc0', deep: '#a32f78', glow: '255,111,192' }
+};
+BM.ENEMY_TEAM = 2;               // 1人用では敵チームが 2
+BM.INK_SPEED_BONUS   = 0.30;     // 自陣の床は速い
+BM.INK_SPEED_PENALTY = -0.26;    // 敵陣の床は遅い
+BM.STAIN_INTERVAL = 0.42;        // 敵が床を汚す間隔（秒）
+BM.KILL_SPLASH = 2;              // 敵撃破時に飛び散るインクの半径（マス）
+BM.DEATH_WIPE = 1;               // やられたとき中立化される自陣の半径
+
+/* ステージのノルマ塗り率 */
+BM.targetRatio = function (stage) {
+  return BM.clamp(0.55 + Math.min(stage, 10) * 0.015, 0.55, 0.70);
+};
+
 /* バランス定数 */
 BM.BOMB_FUSE     = 2.2;   // 導火線（秒）
 BM.CHAIN_DELAY   = 0.055; // 誘爆までのタメ（連鎖の気持ちよさ）

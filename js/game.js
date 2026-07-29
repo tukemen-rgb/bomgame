@@ -50,6 +50,11 @@
     this.lastTickSec = -1;
     this.doorHintCell = null;
     this.hidden = {};
+    this.targetRatio = 0.55;
+    this.myRatio = 0;
+    this.foeRatio = 0;
+    this.inkCounts = { 1: 0, 2: 0, total: 1 };
+    this.inkGain = { 1: 0, 2: 0 };
 
     this.bgPhase = 0;
 
@@ -86,12 +91,12 @@
     var old = this.players;
     var ps = [];
     ps.push(new BM.Player(1, 1, {
-      color: '#7fe3ff', color2: '#1a6f9e', name: '1P',
+      color: '#7fe3ff', color2: '#1a6f9e', name: '1P', team: 1,
       controls: { up: 'ArrowUp', down: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight', bomb: ' ', detonate: 'Enter' }
     }));
     if (n > 1) {
       ps.push(new BM.Player(COLS - 2, ROWS - 2, {
-        color: '#ff9ada', color2: '#a53a80', name: '2P',
+        color: '#ff9ada', color2: '#a53a80', name: '2P', team: 2,
         controls: { up: 'w', down: 's', left: 'a', right: 'd', bomb: 'f', detonate: 'g' }
       }));
     }
@@ -135,19 +140,24 @@
     ];
     this.map.generate(def.density, clear);
 
-    // ソフトブロックの下にアイテムと出口を隠す
+    // ソフトブロックの下にアイテムを隠す
     var blocks = BM.shuffle(this.map.blockCells());
     this.hidden = {};
     var itemPool = this.buildItemPool(def, blocks.length);
     for (var i = 0; i < itemPool.length && i < blocks.length; i++) {
       this.hidden[BM.key(blocks[i].x, blocks[i].y)] = { item: itemPool[i] };
     }
-    var doorBlock = blocks[Math.min(blocks.length - 1, BM.randInt(Math.floor(blocks.length * 0.35), blocks.length - 1))];
-    if (doorBlock) {
-      var k = BM.key(doorBlock.x, doorBlock.y);
-      this.hidden[k] = this.hidden[k] || {};
-      this.hidden[k].door = true;
-    }
+
+    // 出口は最初から見えている。開くのは「敵全滅」ではなくノルマ塗り率の達成。
+    this.targetRatio = BM.targetRatio(n);
+    var open = this.map.freeCells(false).filter(function (c) {
+      return (Math.abs(c.x - 1) + Math.abs(c.y - 1)) >= 8;
+    });
+    var doorCell = open.length ? BM.pick(open) : { x: COLS - 2, y: ROWS - 2 };
+    this.door = { cx: doorCell.x, cy: doorCell.y, t: 0, open: false };
+
+    // 陣地の種：お互いのスタート地点だけ最初から塗っておく
+    this.map.paint(1, 1, 1); this.map.paint(2, 1, 1); this.map.paint(1, 2, 1);
 
     // 敵配置：プレイヤーから十分離す
     var spots = this.map.freeCells(false).filter(function (c) {
@@ -204,7 +214,10 @@
     for (var i = 0; i < pool.length && i < blocks.length; i++) {
       this.hidden[BM.key(blocks[i].x, blocks[i].y)] = { item: pool[i] };
     }
-    this.timeLeft = 120;
+    this.map.paint(1, 1, 1); this.map.paint(2, 1, 1); this.map.paint(1, 2, 1);
+    this.map.paint(COLS - 2, ROWS - 2, 2); this.map.paint(COLS - 3, ROWS - 2, 2); this.map.paint(COLS - 2, ROWS - 3, 2);
+    this.targetRatio = 0;
+    this.timeLeft = 100;
     this.timeUpDone = false;
     this.introT = 1.6;
     this.state = BM.S_PLAY;
@@ -344,6 +357,7 @@
     this.comboTimer = BM.COMBO_WINDOW;
 
     var brokeAny = false;
+    var painted = 0;
     for (var i = 0; i < cells.length; i++) {
       var c = cells[i];
       var delay = c.dist * 0.016;
@@ -351,13 +365,15 @@
       this.flames.push({
         cx: c.x, cy: c.y, kind: c.kind, dir: c.dir,
         t: -delay, life: BM.FLAME_LIFE, power: bomb.power,
-        core: c.kind === 'center'
+        team: bomb.team, core: c.kind === 'center'
       });
 
       if (c.kind === 'block') {
         this.breakBlock(c.x, c.y, bomb.owner);
         brokeAny = true;
       }
+      // ★ このゲームの核：爆風が通ったマスは自分の色になる
+      if (this.map.paint(c.x, c.y, bomb.team)) painted++;
       // 誘爆
       var ob = this.bombAt(c.x, c.y);
       if (ob && ob !== bomb && !ob.exploded && ob.fuse > BM.CHAIN_DELAY) {
@@ -383,10 +399,34 @@
     BM.sound.explosion(bomb.power);
     if (this.chainCount >= 2) {
       BM.sound.chain(this.chainCount);
-      this.fx.text(bomb.x, bomb.y - 14, this.chainCount + ' CHAIN', '#ffd23d', 17);
+      this.fx.text(bomb.x, bomb.y - 30, this.chainCount + ' CHAIN', '#ffd23d', 16);
       if (this.chainCount >= 3) BM.ui.combo(this.chainCount + ' 連鎖!!');
     }
     if (brokeAny) BM.sound.breakBlock();
+    this.onPainted(bomb.team, painted, bomb.x, bomb.y, bomb.owner);
+  };
+
+  /* 塗れたときの共通処理。スコアと演出はここに集約する。 */
+  Game.prototype.onPainted = function (team, n, x, y, owner) {
+    var t = BM.TEAMS[team];
+    if (n <= 0 || !t) return;
+    this.inkGain[team] = (this.inkGain[team] || 0) + n;
+
+    // インクのしぶき
+    this.fx.spawn(Math.min(26, 4 + n * 2), {
+      x: x, y: y, jitter: 10,
+      speedMin: 40, speedMax: 60 + n * 14,
+      rMin: 1.6, rMax: 4.4, lifeMin: 0.25, lifeMax: 0.6,
+      drag: 2.6, gravity: 320, glow: false,
+      colors: [t.ink, t.deep, '#ffffff']
+    });
+
+    if (owner && owner.kind === 'player') {
+      var gained = this.addScore(n * 12, x, y, true);
+      this.fx.text(x, y - 12, '+' + n + ' 塗', t.ink, n >= 8 ? 19 : 15);
+      if (n >= 12) BM.ui.combo(n + ' マス一気塗り!');
+      if (gained) { /* スコアは addScore 側で加算済み */ }
+    }
   };
 
   Game.prototype.breakBlock = function (cx, cy, owner) {
@@ -403,12 +443,36 @@
         this.items.push(new BM.Item(cx, cy, h.item));
         this.fx.sparkle(px, py, BM.ITEMS[h.item].color);
       }
-      if (h.door) {
-        this.door = { cx: cx, cy: cy, t: 0, open: false };
-        this.fx.shock(px, py, 70, 0.6, '160,255,220', 4);
-      }
       delete this.hidden[BM.key(cx, cy)];
     }
+  };
+
+  /* 菱形にインクをまき散らす（撃破時・やられた時の中立化に使う） */
+  Game.prototype.splashInk = function (cx, cy, radius, team, px, py) {
+    var n = 0;
+    for (var dy = -radius; dy <= radius; dy++) {
+      for (var dx = -radius; dx <= radius; dx++) {
+        if (Math.abs(dx) + Math.abs(dy) > radius) continue;
+        if (this.map.paint(cx + dx, cy + dy, team)) n++;
+      }
+    }
+    if (n && px != null) this.onPainted(team, n, px, py, this.players[0]);
+    return n;
+  };
+
+  /* やられた地点の自陣を中立に戻す。死のコストを「陣地」で払わせる。 */
+  Game.prototype.wipeInk = function (cx, cy, radius, team) {
+    var n = 0;
+    for (var dy = -radius; dy <= radius; dy++) {
+      for (var dx = -radius; dx <= radius; dx++) {
+        if (Math.abs(dx) + Math.abs(dy) > radius) continue;
+        var x = cx + dx, y = cy + dy;
+        if (x < 0 || y < 0 || x >= COLS || y >= ROWS) continue;
+        var i = y * COLS + x;
+        if (this.map.ink[i] === team) { this.map.ink[i] = BM.INK_NONE; this.map.inkT[i] = 0; n++; }
+      }
+    }
+    return n;
   };
 
   /* 敵が爆弾を置いた時に逃げ場があるか */
@@ -468,6 +532,8 @@
 
     if (this.state !== BM.S_PLAY) {
       this.stateT += dt;
+      // ステージ名の演出中に決着がついても、そのまま消えるようにする
+      if (this.introT > 0) this.introT -= dt;
       this.fx.update(dt);
       return;
     }
@@ -555,25 +621,21 @@
     // ---- 爆風ダメージ ----
     this.resolveFlameDamage();
 
-    // ---- 出口 ----
-    if (!this.door && this.mode === 'solo' && this.enemies.length === 0 && !this.doorHintCell) {
-      // 敵を全滅させたのに出口が出ていない＝どのブロックの下かを教える
-      for (var hk in this.hidden) {
-        if (this.hidden[hk].door) {
-          var nk = Number(hk);
-          this.doorHintCell = { x: nk % COLS, y: (nk / COLS) | 0 };
-          break;
-        }
-      }
-    }
+    // ---- 塗り率の集計 ----
+    this.map.tickInk(dt);
+    this.inkCounts = this.map.inkCounts();
+    this.myRatio = this.inkCounts[1] / (this.inkCounts.total || 1);
+    this.foeRatio = this.inkCounts[2] / (this.inkCounts.total || 1);
+
+    // ---- 出口：ノルマ塗り率で開く ----
     if (this.door) {
       this.door.t += dt;
-      var aliveEnemies = this.enemies.filter(function (e) { return e.alive; }).length;
-      if (!this.door.open && aliveEnemies === 0) {
+      if (!this.door.open && this.mode === 'solo' && this.myRatio >= this.targetRatio) {
         this.door.open = true;
         BM.sound.doorOpen();
-        this.fx.shock(BM.centerOf(this.door.cx), BM.centerOf(this.door.cy), 120, 0.8, '150,255,210', 5);
-        this.fx.text(BM.centerOf(this.door.cx), BM.centerOf(this.door.cy) - 24, '出口 OPEN!', '#8affd0', 16);
+        this.fx.shock(BM.centerOf(this.door.cx), BM.centerOf(this.door.cy), 130, 0.8, '150,255,210', 5);
+        this.fx.text(BM.centerOf(this.door.cx), BM.centerOf(this.door.cy) - 26, 'ノルマ達成！出口へ', '#8affd0', 16);
+        BM.ui.combo('ノルマ達成 — 出口が開いた!');
       }
       if (this.door.open) {
         var pl = this.players[0];
@@ -608,7 +670,9 @@
           e.alive = false;
           this.combo++;
           this.comboTimer = BM.COMBO_WINDOW;
-          var g = this.addScore(e.def.score, e.x, e.y);
+          this.addScore(e.def.score, e.x, e.y);
+          // 撃破 = その場にインクが飛び散る。倒すこと自体が塗りに直結する。
+          this.splashInk(BM.cellOf(e.x), BM.cellOf(e.y), BM.KILL_SPLASH, 1, e.x, e.y);
           this.fx.enemyPop(e.x, e.y, e.def.color);
           this.fx.addShake(3);
           this.hitStop = Math.max(this.hitStop, 0.05);
@@ -651,6 +715,10 @@
       this.fx.text(p.x, p.y - 20, 'SHIELD!', '#a0f0ff', 15);
       return;
     }
+    // やられると自陣が中立に戻る。塗り合いの世界では、これが一番痛い。
+    var wiped = this.wipeInk(BM.cellOf(p.x), BM.cellOf(p.y), BM.DEATH_WIPE, p.team);
+    if (wiped) this.fx.text(p.x, p.y + 16, '-' + wiped + ' 陣地', '#ff8080', 14);
+
     p.lives--;
     p.hitFlash = 0.6;
     this.fx.addShake(16);
@@ -662,8 +730,19 @@
     BM.sound.hurt();
 
     if (this.mode === 'vs') {
-      p.alive = false;
-      this.onVsDown(p);
+      // 対戦では即敗北にはしない。スタート地点へ戻され、しばらく動けなくなる。
+      // 決着は時間切れ時点の塗り率で決まる。
+      p.lives = 1;
+      p.stun = 2.0;
+      p.invuln = 3.6;
+      p.x = BM.centerOf(p.spawnCx);
+      p.y = BM.centerOf(p.spawnCy);
+      p.activeBombs = 0;
+      for (var bi = this.bombs.length - 1; bi >= 0; bi--) {
+        if (this.bombs[bi].owner === p) { this.bombs.splice(bi, 1); }
+      }
+      this.fx.text(p.x, p.y - 28, p.name + ' ダウン!', '#ff8080', 17);
+      BM.ui.combo(p.name + ' ダウン — 陣地が削れた!');
       return;
     }
 
@@ -688,9 +767,16 @@
 
   Game.prototype.onTimeUp = function () {
     if (this.mode === 'vs') {
-      this.roundWinner = null;
+      // 塗り率で決着
+      var c = this.map.inkCounts();
+      this.finalCounts = c;
+      if (c[1] > c[2]) { this.roundWinner = this.players[0]; this.players[0].wins++; }
+      else if (c[2] > c[1]) { this.roundWinner = this.players[1]; this.players[1].wins++; }
+      else this.roundWinner = null;
       this.state = BM.S_VSROUND;
       this.stateT = 0;
+      this.fx.addFlash(0.4, '255,255,255');
+      BM.sound.fanfare();
       BM.ui.showRoundResult(this);
       return;
     }
@@ -711,21 +797,13 @@
     BM.sound.gameOver();
   };
 
-  Game.prototype.onVsDown = function (loser) {
-    var alive = this.players.filter(function (p) { return p.alive; });
-    this.state = BM.S_VSROUND;
-    this.stateT = 0;
-    if (alive.length === 1) {
-      alive[0].wins++;
-      this.roundWinner = alive[0];
-    } else {
-      this.roundWinner = null; // 相討ち
-    }
-    BM.ui.showRoundResult(this);
-  };
-
   Game.prototype.onStageClear = function () {
-    var bonus = Math.floor(this.timeLeft) * 10 + Math.max(0, this.players[0].lives) * 200;
+    this.clearRatio = this.myRatio;
+    this.bonusTime = Math.floor(this.timeLeft) * 10;
+    this.bonusLife = Math.max(0, this.players[0].lives) * 200;
+    // ノルマぴったりで抜けるより、塗り切ってから抜けたほうが儲かる
+    this.bonusInk = Math.round(this.myRatio * 100) * 30;
+    var bonus = this.bonusTime + this.bonusLife + this.bonusInk;
     this.clearBonus = bonus;
     this.score += bonus;
     if (this.score > this.bestScore) {
@@ -823,14 +901,57 @@
         g.fillRect(px, py, TILE, TILE);
       }
     }
+    // ---- インク（陣地） ----
+    // 塗りたてのマスは一瞬ふくらんでから収まる。ベタ塗りに見えないよう
+    // タイルごとに角丸半径をずらして、にじんだ輪郭にしている。
+    g.save();
+    for (var ii = 0; ii < this.map.ink.length; ii++) {
+      var team = this.map.ink[ii];
+      if (!team) continue;
+      var ix = ii % COLS, iy = (ii / COLS) | 0;
+      if (this.map.tiles[ii] !== BM.T_EMPTY) continue;
+      var T = BM.TEAMS[team];
+      var d = this.map.decor[ii];
+      var age = this.map.inkT[ii];
+      var pop = age < 0.22 ? 1 + Math.sin((age / 0.22) * Math.PI) * 0.28 : 1;
+      var px2 = ix * TILE + TILE / 2, py2 = iy * TILE + TILE / 2;
+      var half = TILE * 0.5 * pop;
+
+      g.fillStyle = hexA(T.deep, 0.55);
+      g.beginPath();
+      roundRect(g, px2 - half, py2 - half, half * 2, half * 2, 5 + d * 9);
+      g.fill();
+
+      g.fillStyle = hexA(T.ink, 0.30);
+      g.beginPath();
+      roundRect(g, px2 - half + 2, py2 - half + 2, half * 2 - 4, half * 2 - 4, 4 + d * 8);
+      g.fill();
+
+      if (age < 0.3) {
+        g.save();
+        g.globalCompositeOperation = 'lighter';
+        g.globalAlpha = (1 - age / 0.3) * 0.5;
+        g.fillStyle = T.ink;
+        g.beginPath();
+        roundRect(g, px2 - half, py2 - half, half * 2, half * 2, 6 + d * 8);
+        g.fill();
+        g.restore();
+      }
+    }
+    g.restore();
+
     // 危険地帯のうっすらした赤（爆風が来る場所）
     g.save();
+    // インクの上でも読めるよう、塗りに加えて枠でも示す
     for (var i = 0; i < this.danger.length; i++) {
       if (this.danger[i] !== 1) continue;
       var cx = i % COLS, cy = (i / COLS) | 0;
-      var pulse = 0.06 + Math.sin(this.bgPhase * 9 + i) * 0.03;
-      g.fillStyle = 'rgba(255,70,50,' + Math.max(0, pulse).toFixed(3) + ')';
+      var pulse = 0.16 + Math.sin(this.bgPhase * 9 + i) * 0.07;
+      g.fillStyle = 'rgba(255,60,40,' + Math.max(0, pulse).toFixed(3) + ')';
       g.fillRect(cx * TILE, cy * TILE, TILE, TILE);
+      g.strokeStyle = 'rgba(255,110,80,' + (0.32 + Math.sin(this.bgPhase * 9 + i) * 0.18).toFixed(3) + ')';
+      g.lineWidth = 2;
+      g.strokeRect(cx * TILE + 2.5, cy * TILE + 2.5, TILE - 5, TILE - 5);
     }
     g.restore();
 
@@ -851,19 +972,6 @@
         if (t === BM.T_WALL) this.drawWall(g, px, py, x, y);
         else this.drawBlock(g, px, py, x, y);
       }
-    }
-    // 出口が眠っているブロックを光らせる
-    var hint = this.doorHintCell;
-    if (hint && this.map.isBlock(hint.x, hint.y)) {
-      var a = 0.35 + Math.sin(this.bgPhase * 6) * 0.25;
-      g.save();
-      g.globalCompositeOperation = 'lighter';
-      g.strokeStyle = 'rgba(140,255,210,' + a.toFixed(2) + ')';
-      g.lineWidth = 3;
-      g.beginPath();
-      roundRect(g, hint.x * TILE + 3, hint.y * TILE + 3, TILE - 6, TILE - 6, 7);
-      g.stroke();
-      g.restore();
     }
   };
 
@@ -978,6 +1086,19 @@
       var r = 6 + i * 5 + (open ? Math.sin(d.t * 4 + i) * 2 : 0);
       g.beginPath();
       g.arc(0, 0, r, spin + i * 2, spin + i * 2 + 4.2);
+      g.stroke();
+    }
+    // 閉じている間は「ノルマまでどれくらいか」をリングで見せる
+    if (!open && this.targetRatio > 0) {
+      var prog = BM.clamp(this.myRatio / this.targetRatio, 0, 1);
+      g.globalCompositeOperation = 'source-over';
+      g.strokeStyle = 'rgba(255,255,255,.14)';
+      g.lineWidth = 3.5;
+      g.beginPath(); g.arc(0, 0, 16, 0, Math.PI * 2); g.stroke();
+      g.strokeStyle = 'rgba(140,255,210,.95)';
+      g.lineWidth = 3.5;
+      g.beginPath();
+      g.arc(0, 0, 16, -Math.PI / 2, -Math.PI / 2 + Math.PI * 2 * prog);
       g.stroke();
     }
     g.restore();
@@ -1113,6 +1234,20 @@
     var sq = 1 + p.squash * 0.22;
     g.save();
     g.translate(p.x, p.y + bob);
+
+    if (p.stun > 0) {
+      // 復帰待ち：ぐるぐる回るインクの輪
+      g.save();
+      g.globalCompositeOperation = 'lighter';
+      g.strokeStyle = hexA(BM.TEAMS[p.team].ink, 0.8);
+      g.lineWidth = 2.5;
+      for (var si = 0; si < 3; si++) {
+        g.beginPath();
+        g.arc(0, -8, 16 + si * 3, p.walkT + si * 2, p.walkT + si * 2 + 1.6);
+        g.stroke();
+      }
+      g.restore();
+    }
 
     // 影
     g.fillStyle = 'rgba(0,0,0,.42)';
@@ -1273,7 +1408,11 @@
     g.fillText(label, W / 2, H / 2 - 8);
     g.font = '600 14px system-ui, sans-serif';
     g.fillStyle = 'rgba(230,215,255,.85)';
-    g.fillText(this.mode === 'vs' ? '先に3勝したほうが勝ち' : '敵を全滅させて出口へ！', W / 2, H / 2 + 26);
+    g.fillText(
+      this.mode === 'vs'
+        ? '時間切れの時点で塗り面積が広いほうが勝ち'
+        : '爆風で床を塗れ！ ノルマ ' + Math.round(this.targetRatio * 100) + '% で出口が開く',
+      W / 2, H / 2 + 26);
     g.restore();
   };
 
