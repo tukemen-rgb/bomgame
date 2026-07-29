@@ -64,28 +64,189 @@
   GameMap.prototype.isBlock = function (cx, cy) { return this.at(cx, cy) === BM.T_BLOCK; };
   GameMap.prototype.isOpen = function (cx, cy) { return this.at(cx, cy) === BM.T_EMPTY; };
 
-  GameMap.prototype.isFixedWall = function (cx, cy) {
-    return cx === 0 || cy === 0 || cx === this.w - 1 || cy === this.h - 1 ||
-           (cx % 2 === 0 && cy % 2 === 0);
+  GameMap.prototype.isBorder = function (cx, cy) {
+    return cx === 0 || cy === 0 || cx === this.w - 1 || cy === this.h - 1;
+  };
+
+  /* =========================================================
+     柱の生成
+     -------------------------------------------------------
+     原典の「偶数マスに1マスの柱が等間隔」という格子はやめて、
+     数種類の形をした岩塊を点対称に配置する。ただし格子が保証していた
+     遊びやすさは壊せないので、次の3つを生成後に検査して満たすまで直す。
+
+       1. 通路は必ず1マス幅以上 … 岩塊どうしを8近傍で離して置く
+       2. 全マスが行き来できる   … 塗りゲーなので孤島があると成立しない
+       3. どのマスに爆弾を置いても逃げられる
+          … そのマスから3歩以内に「行も列も違うマス」があること。
+            爆風は十字にしか伸びないので、これが満たされれば必ず躱せる。
+
+     点対称にしているのは対戦の公平性のためと、乱数の塊ではなく
+     設計された盤面に見せるため。
+     ========================================================= */
+
+  var PILLAR_SHAPES = [
+    [[0, 0]],
+    [[0, 0], [1, 0]],
+    [[0, 0], [0, 1]],
+    [[0, 0], [1, 0], [0, 1]],
+    [[0, 0], [1, 0], [1, 1]],
+    [[0, 0], [1, 0], [2, 0]],
+    [[0, 0], [0, 1], [0, 2]],
+    [[0, 0], [1, 0], [2, 0], [2, 1]]
+  ];
+
+  GameMap.prototype._resetTiles = function () {
+    for (var y = 0; y < this.h; y++) {
+      for (var x = 0; x < this.w; x++) {
+        var i = y * this.w + x;
+        this.tiles[i] = this.isBorder(x, y) ? BM.T_WALL : BM.T_EMPTY;
+        this.decor[i] = Math.random();
+        this.ink[i] = BM.INK_NONE;
+        this.inkT[i] = 1;
+      }
+    }
+  };
+
+  /* 岩塊どうしが 8 近傍で触れないか（＝通路が必ず1マス残るか） */
+  GameMap.prototype._roomFor = function (cells, safe) {
+    for (var i = 0; i < cells.length; i++) {
+      var c = cells[i];
+      if (c.x < 1 || c.y < 1 || c.x > this.w - 2 || c.y > this.h - 2) return false;
+      if (safe[BM.key(c.x, c.y)]) return false;
+      for (var dy = -1; dy <= 1; dy++) {
+        for (var dx = -1; dx <= 1; dx++) {
+          var nx = c.x + dx, ny = c.y + dy;
+          if (this.isBorder(nx, ny)) continue;
+          if (this.at(nx, ny) === BM.T_WALL) return false;
+        }
+      }
+    }
+    return true;
+  };
+
+  /* 到達できる床の数（孤島の検出用） */
+  GameMap.prototype._reachCount = function (sx, sy) {
+    var seen = new Uint8Array(this.w * this.h);
+    var stack = [sy * this.w + sx];
+    seen[sy * this.w + sx] = 1;
+    var n = 0;
+    while (stack.length) {
+      var cur = stack.pop(); n++;
+      var cx = cur % this.w, cy = (cur / this.w) | 0;
+      for (var d = 0; d < 4; d++) {
+        var nx = cx + BM.DIRS[d].x, ny = cy + BM.DIRS[d].y;
+        var ni = ny * this.w + nx;
+        if (nx < 0 || ny < 0 || nx >= this.w || ny >= this.h) continue;
+        if (seen[ni] || this.tiles[ni] === BM.T_WALL) continue;
+        seen[ni] = 1; stack.push(ni);
+      }
+    }
+    return n;
+  };
+
+  GameMap.prototype._floorCount = function () {
+    var n = 0;
+    for (var i = 0; i < this.tiles.length; i++) if (this.tiles[i] !== BM.T_WALL) n++;
+    return n;
+  };
+
+  /* 爆弾を置いたら詰むマス（3歩以内に行も列も違うマスが無い）を列挙 */
+  GameMap.prototype._trapCells = function () {
+    var traps = [];
+    for (var y = 1; y < this.h - 1; y++) {
+      for (var x = 1; x < this.w - 1; x++) {
+        if (this.at(x, y) === BM.T_WALL) continue;
+        if (!this._hasShelter(x, y)) traps.push({ x: x, y: y });
+      }
+    }
+    return traps;
+  };
+
+  GameMap.prototype._hasShelter = function (sx, sy) {
+    var seen = {};
+    var frontier = [{ x: sx, y: sy, d: 0 }];
+    seen[BM.key(sx, sy)] = true;
+    while (frontier.length) {
+      var c = frontier.shift();
+      if (c.x !== sx && c.y !== sy) return true;   // 十字の外に出られた
+      if (c.d >= 3) continue;
+      for (var d = 0; d < 4; d++) {
+        var nx = c.x + BM.DIRS[d].x, ny = c.y + BM.DIRS[d].y;
+        if (this.at(nx, ny) === BM.T_WALL) continue;
+        if (seen[BM.key(nx, ny)]) continue;
+        seen[BM.key(nx, ny)] = true;
+        frontier.push({ x: nx, y: ny, d: c.d + 1 });
+      }
+    }
+    return false;
+  };
+
+  GameMap.prototype._layPillars = function (safe, target) {
+    var placed = 0, guard = 0;
+    while (placed < target && guard++ < 900) {
+      var shape = BM.pick(PILLAR_SHAPES);
+      var ax = BM.randInt(1, this.w - 2), ay = BM.randInt(1, this.h - 2);
+      var cells = [], i;
+      for (i = 0; i < shape.length; i++) cells.push({ x: ax + shape[i][0], y: ay + shape[i][1] });
+      // 180度回転した位置にも同じ形を置いて点対称にする
+      var mirror = [];
+      for (i = 0; i < cells.length; i++) mirror.push({ x: this.w - 1 - cells[i].x, y: this.h - 1 - cells[i].y });
+
+      var all = cells.concat(mirror);
+      var overlaps = false;
+      for (i = 0; i < cells.length && !overlaps; i++)
+        for (var j = 0; j < mirror.length; j++)
+          if (cells[i].x === mirror[j].x && cells[i].y === mirror[j].y) { overlaps = true; break; }
+      if (overlaps) continue;
+      if (!this._roomFor(all, safe)) continue;
+
+      for (i = 0; i < all.length; i++) this.set(all[i].x, all[i].y, BM.T_WALL);
+      placed += all.length;
+    }
+    return placed;
   };
 
   /* spawnClear: 開始地点まわりを空けるセルの配列 */
   GameMap.prototype.generate = function (density, spawnClear) {
-    var x, y, i;
-    this.paintable = 0;
-    for (y = 0; y < this.h; y++) {
-      for (x = 0; x < this.w; x++) {
-        i = y * this.w + x;
-        this.tiles[i] = this.isFixedWall(x, y) ? BM.T_WALL : BM.T_EMPTY;
-        this.decor[i] = Math.random();
-        this.ink[i] = BM.INK_NONE;
-        this.inkT[i] = 1;
-        if (this.tiles[i] !== BM.T_WALL) this.paintable++;
-      }
-    }
+    var i, x, y;
     var safe = {};
     for (i = 0; i < spawnClear.length; i++) safe[BM.key(spawnClear[i].x, spawnClear[i].y)] = true;
 
+    var attempt = 0;
+    for (;;) {
+      attempt++;
+      this._resetTiles();
+      this._layPillars(safe, 30);
+
+      // 逃げ場の無いマスは、隣の柱を1マス削って開ける
+      var repair = 0;
+      for (;;) {
+        var traps = this._trapCells();
+        if (!traps.length || repair++ > 60) break;
+        var t = BM.pick(traps);
+        var opened = false;
+        var dirs = BM.shuffle(BM.DIRS.slice());
+        for (i = 0; i < dirs.length; i++) {
+          var nx = t.x + dirs[i].x, ny = t.y + dirs[i].y;
+          if (this.isBorder(nx, ny)) continue;
+          if (this.at(nx, ny) !== BM.T_WALL) continue;
+          this.set(nx, ny, BM.T_EMPTY);
+          opened = true;
+          break;
+        }
+        if (!opened) break;
+      }
+
+      var ok = this._trapCells().length === 0 &&
+               this._reachCount(spawnClear.length ? spawnClear[0].x : 1,
+                                spawnClear.length ? spawnClear[0].y : 1) === this._floorCount();
+      if (ok || attempt >= 25) break;
+    }
+
+    this.paintable = this._floorCount();
+
+    // ソフトブロック
     for (y = 1; y < this.h - 1; y++) {
       for (x = 1; x < this.w - 1; x++) {
         if (this.at(x, y) !== BM.T_EMPTY) continue;

@@ -78,6 +78,10 @@
     this.stun = 0;
     this.onInk = BM.INK_NONE;
     this.inkStreak = 0;
+    this.lean = 0;      // タンク内の塗料の傾き（左右）
+    this.leanV = 0;     // 同（上下）
+    this.tread = 0;     // 履帯の送り
+    this.nozzle = 0;    // 射出口の反動
   }
 
   /* 自陣のインクの上は速く、敵陣の上は遅い。
@@ -127,7 +131,15 @@
       if (!moved && game.blockedByBomb && this.kick) game.kickBomb(game.blockedByBomb, 0, iy, this);
     }
 
+    // 塗料は動き出しで遅れて傾き、止まると揺り戻す
+    var wantLean = moved ? (ix !== 0 ? ix : 0) : 0;
+    var wantLeanV = moved ? (iy !== 0 ? iy : 0) : 0;
+    this.lean = BM.damp(this.lean, wantLean, 7, dt);
+    this.leanV = BM.damp(this.leanV, wantLeanV, 7, dt);
+    if (this.nozzle > 0) this.nozzle -= dt * 4;
+
     if (moved) {
+      this.tread += dt * this.speed(game) * 0.09;
       this.walkT += dt * (6 + this.speedLv * 1.1);
       var fast = this.onInk === this.team;
       if (this.speedLv >= 3 || fast) {
@@ -152,7 +164,7 @@
     }
 
     if (BM.input.pressed(c.bomb) && this.bombCooldown <= 0) {
-      if (game.placeBomb(this)) { this.bombCooldown = 0.1; this.squash = 1; }
+      if (game.placeBomb(this)) { this.bombCooldown = 0.1; this.squash = 1; this.nozzle = 1; }
     }
     if (BM.input.pressed(c.detonate) && this.remote) game.detonateRemote(this);
   };

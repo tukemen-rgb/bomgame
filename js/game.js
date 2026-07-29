@@ -985,27 +985,44 @@
     }
   };
 
+  /* 柱は塊で置かれるので、外に面した辺だけを立体的に描いて岩の連なりに見せる。
+     全辺に枠を描くと、タイルを並べただけに見えてしまう。 */
   Game.prototype.drawWall = function (g, px, py, x, y) {
     var d = this.map.decor[y * COLS + x];
+    var up = this.map.isWall(x, y - 1), dn = this.map.isWall(x, y + 1);
+    var lf = this.map.isWall(x - 1, y), rt = this.map.isWall(x + 1, y);
+
     g.fillStyle = '#3b2e5c';
     g.fillRect(px, py, TILE, TILE);
     var gr = g.createLinearGradient(px, py, px, py + TILE);
-    gr.addColorStop(0, 'rgba(255,255,255,.22)');
+    gr.addColorStop(0, up ? 'rgba(255,255,255,.07)' : 'rgba(255,255,255,.22)');
     gr.addColorStop(0.45, 'rgba(255,255,255,.04)');
-    gr.addColorStop(1, 'rgba(0,0,0,.35)');
+    gr.addColorStop(1, dn ? 'rgba(0,0,0,.14)' : 'rgba(0,0,0,.38)');
     g.fillStyle = gr;
     g.fillRect(px, py, TILE, TILE);
-    g.fillStyle = 'rgba(0,0,0,.35)';
-    g.fillRect(px, py + TILE - 5, TILE, 5);
-    g.fillStyle = 'rgba(255,255,255,.10)';
-    g.fillRect(px + 3, py + 3, TILE - 6, 3);
-    // リベット
-    g.fillStyle = 'rgba(255,255,255,' + (0.10 + d * 0.08).toFixed(2) + ')';
-    g.beginPath(); g.arc(px + 7, py + 7, 1.8, 0, 6.3); g.fill();
-    g.beginPath(); g.arc(px + TILE - 7, py + 7, 1.8, 0, 6.3); g.fill();
+
+    if (!dn) { g.fillStyle = 'rgba(0,0,0,.35)'; g.fillRect(px, py + TILE - 5, TILE, 5); }
+    if (!up) {
+      g.fillStyle = 'rgba(255,255,255,.12)';
+      g.fillRect(px + (lf ? 0 : 3), py + 3, TILE - (lf ? 0 : 3) - (rt ? 0 : 3), 3);
+    }
+    if (!lf) { g.fillStyle = 'rgba(255,255,255,.06)'; g.fillRect(px, py, 3, TILE); }
+    if (!rt) { g.fillStyle = 'rgba(0,0,0,.18)'; g.fillRect(px + TILE - 3, py, 3, TILE); }
+
+    // 岩肌の粒
+    g.fillStyle = 'rgba(255,255,255,' + (0.06 + d * 0.07).toFixed(2) + ')';
+    g.beginPath(); g.arc(px + 8 + d * 6, py + 10 + d * 8, 2.1, 0, 6.3); g.fill();
+    g.beginPath(); g.arc(px + TILE - 9 - d * 5, py + TILE - 13 + d * 4, 1.5, 0, 6.3); g.fill();
+
+    // 外周の輪郭だけ引く
     g.strokeStyle = 'rgba(0,0,0,.5)';
     g.lineWidth = 1;
-    g.strokeRect(px + .5, py + .5, TILE - 1, TILE - 1);
+    g.beginPath();
+    if (!up) { g.moveTo(px, py + .5); g.lineTo(px + TILE, py + .5); }
+    if (!dn) { g.moveTo(px, py + TILE - .5); g.lineTo(px + TILE, py + TILE - .5); }
+    if (!lf) { g.moveTo(px + .5, py); g.lineTo(px + .5, py + TILE); }
+    if (!rt) { g.moveTo(px + TILE - .5, py); g.lineTo(px + TILE - .5, py + TILE); }
+    g.stroke();
   };
 
   Game.prototype.drawBlock = function (g, px, py, x, y) {
@@ -1137,6 +1154,21 @@
       gr.addColorStop(1, '#0d0a16');
       g.fillStyle = gr;
       g.beginPath(); g.arc(0, 0, r, 0, 6.3); g.fill();
+
+      // 中身の塗料が見える帯。誰の爆弾かが一目で分かる。
+      var T = BM.TEAMS[b.team];
+      if (T) {
+        g.save();
+        g.beginPath(); g.arc(0, 0, r, 0, 6.3); g.clip();
+        g.fillStyle = hexA(T.deep, 0.95);
+        g.fillRect(-r, -r * 0.26, r * 2, r * 0.62);
+        g.fillStyle = hexA(T.ink, 0.95);
+        g.fillRect(-r, -r * 0.26, r * 2, r * 0.2);
+        g.restore();
+        g.strokeStyle = hexA(T.ink, 0.45);
+        g.lineWidth = 1.2;
+        g.beginPath(); g.arc(0, 0, r - 0.6, 0, 6.3); g.stroke();
+      }
 
       if (b.pierce) {
         g.strokeStyle = 'rgba(255,92,224,.85)';
@@ -1274,52 +1306,80 @@
 
     g.scale(1 / sq, sq);
 
-    // 足
-    g.fillStyle = p.color2;
-    var legSwing = Math.sin(p.walkT) * 4;
-    g.beginPath(); roundRect(g, -9, 8, 7, 9 + legSwing * 0.3, 3); g.fill();
-    g.beginPath(); roundRect(g, 2, 8, 7, 9 - legSwing * 0.3, 3); g.fill();
-
-    // 胴体
-    var gr = g.createLinearGradient(0, -16, 0, 14);
-    gr.addColorStop(0, '#ffffff');
-    gr.addColorStop(1, '#c8d4e6');
-    g.fillStyle = gr;
-    g.beginPath(); roundRect(g, -12, -8, 24, 20, 8); g.fill();
-    g.strokeStyle = 'rgba(20,15,40,.55)'; g.lineWidth = 1.6; g.stroke();
-
-    // ヘルメット
-    var hg = g.createLinearGradient(0, -22, 0, 0);
-    hg.addColorStop(0, p.color);
-    hg.addColorStop(1, p.color2);
-    g.fillStyle = hg;
-    g.beginPath();
-    g.arc(0, -8, 13, Math.PI, 0);
-    g.lineTo(13, -3); g.lineTo(-13, -3); g.closePath();
-    g.fill();
-    g.strokeStyle = 'rgba(20,15,40,.55)'; g.stroke();
-
-    // バイザー（向きで少しずれる）
-    var vx = p.dir === 'left' ? -3 : (p.dir === 'right' ? 3 : 0);
-    var vy = p.dir === 'up' ? -2 : 0;
-    g.fillStyle = 'rgba(15,10,30,.9)';
-    g.beginPath(); roundRect(g, -9 + vx, -12 + vy, 18, 8, 4); g.fill();
-    if (p.dir !== 'up') {
-      g.fillStyle = 'rgba(255,255,255,.85)';
-      g.beginPath(); g.arc(-4 + vx, -9 + vy, 1.9, 0, 6.3); g.fill();
-      g.beginPath(); g.arc(3 + vx, -9 + vy, 1.9, 0, 6.3); g.fill();
+    // ---- 履帯 ----
+    // 丸い体に足、ではなく角のあるタンクにキャタピラ。輪郭で区別がつくようにしている。
+    g.fillStyle = '#241d38';
+    g.beginPath(); roundRect(g, -13, 7, 26, 11, 5); g.fill();
+    g.strokeStyle = 'rgba(10,6,22,.8)'; g.lineWidth = 1.4; g.stroke();
+    g.save();
+    g.beginPath(); roundRect(g, -13, 7, 26, 11, 5); g.clip();
+    g.fillStyle = 'rgba(255,255,255,.16)';
+    for (var t = 0; t < 6; t++) {
+      var tx = -14 + ((t * 5 + (p.tread % 5) + 30) % 30);
+      g.fillRect(tx, 7, 2.2, 11);
     }
-    // アンテナ
-    g.strokeStyle = p.color; g.lineWidth = 2;
-    g.beginPath(); g.moveTo(0, -20); g.lineTo(0, -26); g.stroke();
-    g.fillStyle = '#ffd23d';
-    g.beginPath(); g.arc(0, -27, 2.6, 0, 6.3); g.fill();
+    g.restore();
+
+    // ---- 塗料タンク（胴体） ----
+    var bg = g.createLinearGradient(0, -18, 0, 10);
+    bg.addColorStop(0, '#e8ecf6');
+    bg.addColorStop(0.55, '#b9c2d6');
+    bg.addColorStop(1, '#6f7894');
+    g.fillStyle = bg;
+    g.beginPath(); roundRect(g, -12, -17, 24, 26, 6); g.fill();
+    g.strokeStyle = 'rgba(18,12,34,.7)'; g.lineWidth = 1.8; g.stroke();
+
+    // 覗き窓の中で塗料が揺れる。動くと遅れて傾くので、そこで生き物っぽさを出す。
+    g.save();
+    g.beginPath(); roundRect(g, -8.5, -13, 17, 19, 4); g.clip();
+    g.fillStyle = '#140f26';
+    g.fillRect(-9, -14, 19, 21);
+    var surf = -1 + p.leanV * 3;
+    var tilt = p.lean * 4.5;
+    g.fillStyle = BM.TEAMS[p.team].deep;
+    g.beginPath();
+    g.moveTo(-9, surf + tilt);
+    g.lineTo(9, surf - tilt);
+    g.lineTo(9, 8); g.lineTo(-9, 8);
+    g.closePath(); g.fill();
+    g.fillStyle = BM.TEAMS[p.team].ink;
+    g.beginPath();
+    g.moveTo(-9, surf + tilt);
+    g.lineTo(9, surf - tilt);
+    g.lineTo(9, surf - tilt + 3.5); g.lineTo(-9, surf + tilt + 3.5);
+    g.closePath(); g.fill();
+    g.restore();
+    g.strokeStyle = 'rgba(18,12,34,.6)'; g.lineWidth = 1.4;
+    g.beginPath(); roundRect(g, -8.5, -13, 17, 19, 4); g.stroke();
+
+    // ---- 単眼レンズ ----
+    // 二つ目＋バイザーの造形を避けて、向きが読めるように単眼にした。
+    var lx = p.dir === 'left' ? -3.2 : (p.dir === 'right' ? 3.2 : 0);
+    var ly = p.dir === 'up' ? -2.4 : (p.dir === 'down' ? 1.6 : 0);
+    g.fillStyle = '#0e0a1c';
+    g.beginPath(); g.arc(0, -19.5, 6.2, 0, 6.3); g.fill();
+    g.strokeStyle = 'rgba(18,12,34,.8)'; g.lineWidth = 1.6; g.stroke();
+    var lg = g.createRadialGradient(lx - 1, -20.5 + ly, 0.5, lx, -19.5 + ly, 4.4);
+    lg.addColorStop(0, '#ffffff');
+    lg.addColorStop(0.4, p.color);
+    lg.addColorStop(1, p.color2);
+    g.fillStyle = lg;
+    g.beginPath(); g.arc(lx, -19.5 + ly, 4.2, 0, 6.3); g.fill();
+    g.fillStyle = 'rgba(255,255,255,.9)';
+    g.beginPath(); g.arc(lx - 1.4, -21 + ly, 1.2, 0, 6.3); g.fill();
+
+    // ---- 射出口（爆弾を落とすと反動で沈む） ----
+    var nz = p.nozzle > 0 ? p.nozzle * 3 : 0;
+    g.fillStyle = '#39304f';
+    g.beginPath(); roundRect(g, -3.5, -27 + nz, 7, 8, 2.5); g.fill();
+    g.fillStyle = BM.TEAMS[p.team].ink;
+    g.beginPath(); roundRect(g, -2.5, -27.5 + nz, 5, 2.2, 1); g.fill();
 
     if (p.hitFlash > 0) {
       g.globalCompositeOperation = 'lighter';
       g.globalAlpha = p.hitFlash;
       g.fillStyle = '#ff4444';
-      g.beginPath(); g.arc(0, -4, 22, 0, 6.3); g.fill();
+      g.beginPath(); g.arc(0, -6, 24, 0, 6.3); g.fill();
     }
     g.restore();
   };
@@ -1354,16 +1414,30 @@
     gr.addColorStop(0.35, d.color);
     gr.addColorStop(1, d.dark);
     g.fillStyle = e.hurtFlash > 0 ? '#ffffff' : gr;
+
+    // 床を汚して回る存在なので、輪郭を「垂れたインクの染み」にしている
+    var w1 = Math.sin(e.bob * 0.9) * 1.6;
+    var w2 = Math.cos(e.bob * 1.3) * 1.6;
     g.beginPath();
-    // ぷにっとした胴体
-    g.moveTo(-13, 6);
-    g.quadraticCurveTo(-15, -14, 0, -14);
-    g.quadraticCurveTo(15, -14, 13, 6);
-    g.quadraticCurveTo(13, 15, 0, 15);
-    g.quadraticCurveTo(-13, 15, -13, 6);
+    g.moveTo(-13, 4);
+    g.quadraticCurveTo(-15 + w1, -15, -1, -14.5);
+    g.quadraticCurveTo(14 + w2, -14, 13, 4);
+    // 下辺のしずく
+    g.quadraticCurveTo(12.5, 10, 8, 11);
+    g.quadraticCurveTo(6.5, 16 + w1, 4.5, 11.5);
+    g.quadraticCurveTo(2, 14, -0.5, 11.5);
+    g.quadraticCurveTo(-2.5, 17 + w2, -4.5, 11);
+    g.quadraticCurveTo(-9, 11.5, -13, 4);
     g.closePath();
     g.fill();
     g.strokeStyle = 'rgba(15,8,30,.6)'; g.lineWidth = 1.6; g.stroke();
+
+    // まわりに飛んだ点々
+    g.fillStyle = e.hurtFlash > 0 ? '#ffffff' : d.dark;
+    g.globalAlpha *= 0.75;
+    g.beginPath(); g.arc(-15 + w1, 8, 1.8, 0, 6.3); g.fill();
+    g.beginPath(); g.arc(15 + w2, 6.5, 1.4, 0, 6.3); g.fill();
+    g.globalAlpha /= 0.75;
 
     // 目
     var lookX = e.target ? BM.clamp((BM.centerOf(e.target.x) - e.x) * 0.06, -2.5, 2.5) : 0;
