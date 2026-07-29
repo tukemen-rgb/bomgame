@@ -1,9 +1,10 @@
 /* =========================================================
-   BLAST RUSH — ヘッドレス動作確認
+   DEEP FALL — ヘッドレス動作確認
      node test/smoke.js
-   静的サーバーを立てて Chromium で一通り遊び、
-   コンソールエラーが出ないこと・60fps 出ることを確認する。
-   スクリーンショットは test/screenshots/ に出る。
+
+   要は「生成された縦坑を本当に抜けられるか」の検証。
+   落下は止められないので、届かない隙間を1つ作っただけで理不尽死になる。
+   そこで隙間へ向かって操作する自動操縦を積んで、実際に潜らせて測る。
    ========================================================= */
 const { chromium } = require('playwright');
 const http = require('http');
@@ -12,8 +13,7 @@ const path = require('path');
 
 const ROOT = path.join(__dirname, '..');
 const SHOTS = path.join(__dirname, 'screenshots');
-const PORT = 8901;
-
+const PORT = 8911;
 const MIME = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css' };
 
 function serve() {
@@ -39,6 +39,65 @@ function chromiumPath() {
   return dir ? path.join(base, dir, 'chrome-linux', 'chrome') : undefined;
 }
 
+/* ページ内に仕込む自動操縦。人間と同じく2層先まで見て穴の中心を狙う。 */
+function installPilot() {
+  window.__deaths = [];
+  function passable(l, c) {
+    if (!l || !l.cells) return true;
+    const t = l.cells[c];
+    return t !== BM.T_ROCK && t !== BM.T_BOMB;
+  }
+  function options(g, l) {
+    if (l.buttons) {
+      const un = l.buttons.filter(b => !b.hit);
+      if (un.length) return un.map(b => g.buttonPos(b).x);
+    }
+    const out = []; let run = [];
+    for (let c = BM.PLAY_L; c <= BM.PLAY_R + 1; c++) {
+      if (c <= BM.PLAY_R && passable(l, c)) run.push(c);
+      else if (run.length) { out.push(BM.centerX((run[0] + run[run.length - 1]) / 2)); run = []; }
+    }
+    return out;
+  }
+  function pilot() {
+    const g = BM.game, p = g.player, I = BM.input;
+    I.keys['ArrowLeft'] = I.keys['ArrowRight'] = false;
+    if (!p.alive || g.state !== 'play') return;
+    const ahead = g.world.layers
+      .filter(l => (l.row + 1) * BM.TILE > p.y - p.r)
+      .sort((a, b) => a.row - b.row);
+    const cur = ahead[0], nxt = ahead[1];
+    if (!cur) return;
+    const opts = options(g, cur);
+    if (!opts.length) { I.just[' '] = true; return; }   // 抜け道が無ければ掘る
+    const nextOpts = nxt ? options(g, nxt) : null;
+    let best = opts[0], bestCost = Infinity;
+    for (const x of opts) {
+      let cost = Math.abs(x - p.x);
+      if (nextOpts && nextOpts.length) {
+        let nd = Infinity;
+        for (const nx of nextOpts) nd = Math.min(nd, Math.abs(nx - x));
+        cost += nd * 0.8;
+      }
+      if (cost < bestCost) { bestCost = cost; best = x; }
+    }
+    const dx = best - p.x;
+    if (dx < -3) I.keys['ArrowLeft'] = true;
+    else if (dx > 3) I.keys['ArrowRight'] = true;
+  }
+  const orig = BM.Game.prototype.update;
+  BM.Game.prototype.update = function (dt) {
+    if (this.state === 'play') pilot();
+    const was = this.player.alive;
+    const r = orig.call(this, dt);
+    if (was && !this.player.alive) {
+      const l = this.crashCell ? this.world.layerAt(this.crashCell.row) : null;
+      window.__deaths.push({ depth: this.player.deepest, type: l ? l.type : '?' });
+    }
+    return r;
+  };
+}
+
 (async () => {
   fs.mkdirSync(SHOTS, { recursive: true });
   const srv = await serve();
@@ -49,207 +108,111 @@ function chromiumPath() {
   const errors = [];
   page.on('pageerror', e => errors.push('PAGEERROR: ' + e.message + '\n' + (e.stack || '')));
   page.on('console', m => { if (m.type() === 'error') errors.push('CONSOLE: ' + m.text()); });
-
-  const shot = n => page.screenshot({ path: path.join(SHOTS, n) });
-  const snap = () => page.evaluate(() => ({
-    state: BM.game.state, stage: BM.game.stage, score: BM.game.score,
-    enemies: BM.game.enemies.length, bombs: BM.game.bombs.length,
-    blocks: BM.game.map.blockCells().length,
-    lives: BM.game.players[0] && BM.game.players[0].lives,
-    ink: Math.round(BM.game.myRatio * 100) + '%',
-    foe: Math.round(BM.game.foeRatio * 100) + '%',
-    target: Math.round(BM.game.targetRatio * 100) + '%'
-  }));
   const check = (label, cond) => {
     console.log((cond ? '  ok   ' : '  FAIL ') + label);
     if (!cond) errors.push('ASSERT FAILED: ' + label);
   };
+  const shot = n => page.screenshot({ path: path.join(SHOTS, n) });
 
   await page.goto(`http://localhost:${PORT}/index.html`);
-  await page.waitForTimeout(500);
-  await shot('01-title.png');
-  check('タイトルが表示される', await page.isVisible('button[data-act="solo"]'));
-
-  // ---- 1P 開始 ----
-  await page.click('button[data-act="solo"]');
   await page.waitForTimeout(400);
-  const s = await snap();
-  console.log('  開始:', JSON.stringify(s));
-  check('プレイ状態になる', s.state === 'play');
-  check('敵が湧いている', s.enemies > 0);
-  check('ソフトブロックがある', s.blocks > 10);
-  check('出口が最初から盤上にある', await page.evaluate(() => !!BM.game.door));
-  check('ノルマ未達なら出口は閉じている',
-    await page.evaluate(() => BM.game.myRatio < BM.game.targetRatio && !BM.game.door.open));
-  check('スタート地点が自陣として塗られている', await page.evaluate(() => BM.game.map.inkAt(1, 1) === 1));
+  await shot('01-title.png');
+  check('タイトルが表示される', await page.isVisible('button[data-act="play"]'));
 
-  // ---- 回帰: 爆弾を置いた直後にそのマスから動けなくなる不具合 ----
-  // すり抜け許可を「中心セルが変わったら解除」にすると、当たり判定の箱の後ろ半分が
-  // 爆弾のマスに残ったまま解除され、前にも後ろにも進めなくなる。
-  const CROSS = (cx, cy) => page.evaluate(({ cx, cy }) => {
-    const g = BM.game, p = g.players[0];
-    p.invuln = 9999; p.activeBombs = 0; p.bombCooldown = 0; g.bombs.length = 0;
-    for (let d = -3; d <= 3; d++) { g.map.set(cx + d, cy, BM.T_EMPTY); g.map.set(cx, cy + d, BM.T_EMPTY); }
-    p.x = BM.centerOf(cx); p.y = BM.centerOf(cy);
-    return { x: p.x, y: p.y };
-  }, { cx, cy });
+  await page.click('button[data-act="play"]');
+  await page.waitForTimeout(500);
+  check('落下が始まっている', await page.evaluate(() => BM.game.state === 'play' && BM.game.player.vy > 100));
+  check('カメラが下へ動いている', await page.evaluate(() => BM.game.camY > -400));
 
-  for (const [key, axis, sign] of [
-    ['ArrowRight', 'x', 1], ['ArrowLeft', 'x', -1],
-    ['ArrowDown', 'y', 1], ['ArrowUp', 'y', -1]
-  ]) {
-    const start = await CROSS(7, 5);
-    await page.keyboard.press(' ');
-    await page.waitForTimeout(80);
-    await page.keyboard.down(key);
-    await page.waitForTimeout(700);
-    await page.keyboard.up(key);
-    const now = await page.evaluate(a => BM.game.players[0][a], axis);
-    const moved = (now - start[axis]) * sign;
-    check(`爆弾を置いた直後に ${key} で逃げられる（${moved.toFixed(0)}px 移動）`, moved > 60);
-  }
-
-  // 離れたあとの爆弾はちゃんと壁として働く（すり抜けっぱなしにならない）
-  await CROSS(7, 5);
-  await page.keyboard.press(' ');
-  await page.waitForTimeout(80);
-  await page.keyboard.down('ArrowRight');
-  await page.waitForTimeout(700);
-  await page.keyboard.up('ArrowRight');
-  await page.keyboard.down('ArrowLeft');
-  await page.waitForTimeout(900);
-  await page.keyboard.up('ArrowLeft');
-  const blocked = await page.evaluate(() => BM.cellOf(BM.game.players[0].x));
-  check('離れたあとは自分の爆弾に戻れない', blocked > 7);
-  await page.evaluate(() => { BM.game.bombs.length = 0; BM.game.players[0].activeBombs = 0; });
-
-  // ---- 実際にキー入力で歩いて爆弾を置く ----
+  /* ---- 静止しているとやられる（このゲームの唯一の負け条件） ---- */
   await page.evaluate(() => {
-    const p = BM.game.players[0];
-    p.power = 5; p.maxBombs = 5; p.speedLv = 2; p.kick = true; p.invuln = 9999;
-  });
-  const keys = ['ArrowRight', 'ArrowDown', 'ArrowLeft', 'ArrowUp'];
-  for (let i = 0; i < 32; i++) {
-    const k = keys[i % keys.length];
-    await page.keyboard.down(k);
-    await page.waitForTimeout(120);
-    await page.keyboard.press(' ');
-    await page.waitForTimeout(180);
-    await page.keyboard.up(k);
-    if (i === 10) await shot('02-play.png');
-  }
-  const s2 = await snap();
-  console.log('  プレイ後:', JSON.stringify(s2));
-  check('爆弾でブロックが壊れている', s2.blocks < s.blocks);
-  check('スコアが入っている', s2.score > 0);
-  check('爆風で床が塗れている', parseInt(s2.ink) > parseInt(s.ink));
-  check('敵が床を敵色に汚している', parseInt(s2.foe) > 0);
-
-  // 自陣インクの上では速く、敵陣では遅くなるか
-  const speeds = await page.evaluate(() => {
-    const g = BM.game, p = g.players[0];
-    const cx = BM.cellOf(p.x), cy = BM.cellOf(p.y);
-    const save = g.map.inkAt(cx, cy);
-    const out = {};
-    g.map.ink[cy * BM.COLS + cx] = 1; out.mine = p.speed(g);
-    g.map.ink[cy * BM.COLS + cx] = 2; out.foe = p.speed(g);
-    g.map.ink[cy * BM.COLS + cx] = 0; out.neutral = p.speed(g);
-    g.map.ink[cy * BM.COLS + cx] = save;
-    return out;
-  });
-  console.log('  速度 自陣/中立/敵陣:', speeds.mine.toFixed(0), speeds.neutral.toFixed(0), speeds.foe.toFixed(0));
-  check('自陣は中立より速い', speeds.mine > speeds.neutral);
-  check('敵陣は中立より遅い', speeds.foe < speeds.neutral);
-
-  // ---- 連鎖爆発 ----
-  await page.evaluate(() => {
-    const g = BM.game, p = g.players[0];
-    p.power = 5; p.maxBombs = 8; p.pierce = true;
-    const free = g.map.freeCells(false);
-    for (let i = 0; i < 5; i++) {
-      const c = free[Math.floor(Math.random() * free.length)];
-      if (g.bombAt(c.x, c.y)) continue;
-      const b = new BM.Bomb(c.x, c.y, p);
-      b.fuse = 0.25 + i * 0.08;
-      p.activeBombs++; g.bombs.push(b);
-    }
-  });
-  await page.waitForTimeout(430);
-  await shot('03-boom.png');
-  await page.waitForTimeout(900);
-
-  // ---- ノルマ塗り率 → 出口が開く ----
-  check('出口の開閉はノルマ塗り率と一致している',
-    await page.evaluate(() => BM.game.door.open === (BM.game.myRatio >= BM.game.targetRatio)));
-  await page.evaluate(() => {
-    // ブロックを全部壊してから盤面を自陣色で塗り、ノルマ達成状態を作る
     const g = BM.game;
-    g.enemies.length = 0;
-    for (let y = 1; y < BM.ROWS - 1; y++) {
-      for (let x = 1; x < BM.COLS - 1; x++) {
-        if (g.map.isBlock(x, y)) g.map.set(x, y, BM.T_EMPTY);
-        g.map.paint(x, y, 1);
+    // 目の前に岩を敷いて、ぶつかったら終わりになることを確かめる
+    const row = BM.rowOf(g.player.y) + 3;
+    const cells = new Uint8Array(BM.COLS).fill(BM.T_ROCK);
+    const l = { row, type: 'test', cells, gapX: 7, t: 0, phase: 0, exit: [7, 7], passed: false, item: null, button: null, dynamic: false };
+    g.world.layers.push(l); g.world.byRow[row] = l;
+  });
+  await page.waitForTimeout(800);
+  check('岩に触れたら墜落する', await page.evaluate(() => BM.game.state === 'over' && !BM.game.player.alive));
+  await shot('02-crash.png');
+
+  /* ---- 自動操縦で実際に潜らせる ---- */
+  await page.evaluate(installPilot);
+  const depths = [];
+  const RUNS = 6, SECONDS = 18;
+  for (let i = 0; i < RUNS; i++) {
+    await page.evaluate(() => { BM.game.newRun(); BM.ui.hide(); });
+    await page.waitForTimeout(SECONDS * 1000);
+    const st = await page.evaluate(() => ({ d: BM.game.player.deepest, alive: BM.game.player.alive, score: BM.game.score }));
+    depths.push(st.d);
+    console.log(`  走行${i + 1}: ${st.d}m / ${st.score}点 ${st.alive ? '(まだ落下中)' : '(墜落)'}`);
+    if (i === 1 && st.alive) await shot('03-play.png');
+  }
+  depths.sort((a, b) => a - b);
+  const median = depths[RUNS >> 1];
+  console.log('  到達深度 最小/中央/最大:', depths[0], '/', median, '/', depths[RUNS - 1]);
+
+  // 生成が理不尽でなければ、素直に穴を狙うだけで必ずある程度は潜れる
+  check('自動操縦でも最低 25m は潜れる（=詰む生成が無い）', depths[0] >= 25);
+  check('中央値 60m 以上（=抜け道が続いている）', median >= 60);
+
+  const deaths = await page.evaluate(() => window.__deaths);
+  const byType = {};
+  deaths.forEach(d => { byType[d.type] = (byType[d.type] || 0) + 1; });
+  console.log('  墜落した地層:', JSON.stringify(byType));
+
+  /* ---- 隙間の作り方が一通り出てくるか ---- */
+  const seen = await page.evaluate(() => {
+    const w = new BM.World();
+    const kinds = {};
+    for (let k = 0; k < 40; k++) {
+      w.reset();
+      w.ensure(600);
+      w.layers.forEach(l => { kinds[l.type] = (kinds[l.type] || 0) + 1; });
+    }
+    return kinds;
+  });
+  console.log('  出現した地層の種類:', JSON.stringify(seen));
+  check('隙間の作り方が9種類とも出る', Object.keys(seen).length >= 9);
+
+  /* ---- 動く穴がプレイヤーより速く逃げないこと ---- */
+  const tooFast = await page.evaluate(() => {
+    const w = new BM.World();
+    let bad = 0;
+    for (let k = 0; k < 30; k++) {
+      w.reset(); w.ensure(600);
+      for (const l of w.layers) {
+        if (!l.dynamic || !l.range) continue;
+        const span = l.range[1] - l.range[0];
+        const vpx = Math.abs(l.speed) * (span / 2) * BM.TILE;
+        if (vpx > BM.MOVE_SPEED) bad++;
       }
     }
+    return bad;
   });
-  await page.waitForTimeout(700);
-  check('ノルマ達成で出口が開く', await page.evaluate(() => !!(BM.game.door && BM.game.door.open)));
-  await shot('04-door.png');
+  check('動く穴はプレイヤーの横移動より遅い', tooFast === 0);
 
-  await page.evaluate(() => {
+  /* ---- 爆弾で掘れること ---- */
+  const dug = await page.evaluate(() => {
     const g = BM.game;
-    g.players[0].x = BM.centerOf(g.door.cx);
-    g.players[0].y = BM.centerOf(g.door.cy);
-  });
-  await page.waitForTimeout(400);
-  const s3 = await snap();
-  check('出口に入るとクリアになる', s3.state === 'clear');
-  check('クリアボーナスが入る', s3.score > s2.score);
-  await shot('05-clear.png');
-
-  await page.click('button[data-act="next"]');
-  await page.waitForTimeout(500);
-  const s4 = await snap();
-  check('次のステージへ進む', s4.state === 'play' && s4.stage === 2);
-  check('スコアは持ち越される', s4.score >= s3.score);
-
-  // ---- 敵AIの放置シミュレーション（bomber が出るステージ） ----
-  await page.evaluate(() => BM.game.startStage(9, false));
-  await page.waitForTimeout(9000);
-  const s5 = await snap();
-  console.log('  ステージ9 放置9秒:', JSON.stringify(s5));
-  check('AI が自爆で全滅していない', s5.enemies > 0);
-  await shot('06-stage9.png');
-
-  // ---- 対戦モード ----
-  await page.evaluate(() => { BM.game.toTitle(); BM.ui.showTitle(BM.game); });
-  await page.waitForTimeout(200);
-  await page.click('button[data-act="vs"]');
-  await page.waitForTimeout(600);
-  check('2P が生成される', await page.evaluate(() => BM.game.players.length === 2));
-  check('2P の陣地が最初から塗られている', await page.evaluate(() => BM.game.map.inkAt(BM.COLS - 2, BM.ROWS - 2) === 2));
-  await shot('07-vs.png');
-
-  // 対戦では「やられた＝即敗北」ではなく、スタンして陣地が削れるだけ
-  await page.evaluate(() => BM.game.hurtPlayer(BM.game.players[1]));
-  await page.waitForTimeout(200);
-  const downed = await page.evaluate(() => ({ state: BM.game.state, stun: BM.game.players[1].stun }));
-  check('ダウンしてもラウンドは続く', downed.state === 'play' && downed.stun > 0);
-
-  // 1P が優勢な状態で時間切れにする → 塗り面積で決着
-  await page.evaluate(() => {
-    const g = BM.game;
-    for (let y = 1; y < BM.ROWS - 1; y++)
-      for (let x = 1; x < 8; x++)
-        if (!g.map.isBlock(x, y)) g.map.paint(x, y, 1);
-    g.timeLeft = 0.05;
+    g.newRun(); BM.ui.hide();
+    const row = BM.rowOf(g.player.y) + 6;
+    const cells = new Uint8Array(BM.COLS).fill(BM.T_ROCK);
+    const l = { row, type: 'test', cells, gapX: 7, t: 0, phase: 0, exit: [7, 7], passed: false, item: null, button: null, dynamic: false };
+    g.world.layers.push(l); g.world.byRow[row] = l;
+    const before = Array.from(cells).filter(c => c === BM.T_ROCK).length;
+    g.dropBomb(g.player);
+    return { before, col: BM.colOf(g.player.x), row };
   });
   await page.waitForTimeout(500);
-  const vs = await page.evaluate(() => ({ state: BM.game.state, w1: BM.game.players[0].wins, w2: BM.game.players[1].wins }));
-  check('時間切れの塗り面積で1Pがラウンド獲得', vs.state === 'vsround' && vs.w1 === 1 && vs.w2 === 0);
-  await shot('08-vsround.png');
+  const after = await page.evaluate(r => {
+    const l = BM.game.world.layerAt(r);
+    return l ? Array.from(l.cells).filter(c => c === BM.T_ROCK).length : -1;
+  }, dug.row);
+  check('落とした爆弾が地層に穴を開ける', after >= 0 && after < dug.before);
+  await shot('04-dig.png');
 
-  // ---- フレームレート ----
   const fps = await page.evaluate(() => new Promise(res => {
     let n = 0; const t0 = performance.now();
     (function tick() {

@@ -1,5 +1,5 @@
 /* =========================================================
-   BLAST RUSH — WebAudio による効果音 / BGM 合成
+   DEEP FALL — WebAudio による効果音 / BGM 合成
    外部アセット無し。すべてその場で波形を作る。
    ========================================================= */
 (function (BM) {
@@ -110,11 +110,71 @@
 
   /* ---------- 効果音 ---------- */
 
-  Sound.prototype.place = function () {
+  /* 爆弾を落とす */
+  Sound.prototype.drop = function () {
     if (!this.ctx) return;
     var t = this._now();
-    this._tone({ at: t, type: 'square', f0: 620, f1: 300, dur: 0.09, vol: 0.16, exp: true });
-    this._noiseBurst({ at: t, fStart: 2600, fEnd: 700, dur: 0.07, vol: 0.12 });
+    this._tone({ at: t, type: 'square', f0: 720, f1: 220, dur: 0.16, vol: 0.16, exp: true });
+    this._noiseBurst({ at: t, fStart: 2600, fEnd: 500, dur: 0.1, vol: 0.1 });
+  };
+
+  /* 爆弾切れ */
+  Sound.prototype.empty = function () {
+    if (!this.ctx) return;
+    this._tone({ type: 'square', f0: 200, f1: 150, dur: 0.1, vol: 0.1, exp: true });
+  };
+
+  /* もろい岩を砕く */
+  Sound.prototype.crack = function () {
+    if (!this.ctx) return;
+    var t = this._now();
+    this._noiseBurst({ at: t, fStart: 4200, fEnd: 400, dur: 0.2, vol: 0.24, q: 1.5 });
+    this._tone({ at: t, type: 'triangle', f0: 300, f1: 120, dur: 0.16, vol: 0.16, exp: true });
+  };
+
+  /* 壁のボタン */
+  Sound.prototype.button = function () {
+    if (!this.ctx) return;
+    var t = this._now();
+    this._tone({ at: t, type: 'square', f0: 880, dur: 0.07, vol: 0.16 });
+    this._tone({ at: t + 0.06, type: 'square', f0: 1318, dur: 0.14, vol: 0.16 });
+  };
+
+  /* 狭い穴を抜けた */
+  Sound.prototype.nice = function () {
+    if (!this.ctx) return;
+    var t = this._now();
+    [1046, 1318, 1568].forEach(function (f, i) {
+      this._tone({ at: t + i * 0.04, type: 'triangle', f0: f, dur: 0.12, vol: 0.13 });
+    }, this);
+  };
+
+  /* シールドで岩を突き破る */
+  Sound.prototype.shield = function () {
+    if (!this.ctx) return;
+    var t = this._now();
+    this._tone({ at: t, type: 'sine', f0: 900, f1: 300, dur: 0.3, vol: 0.24, exp: true });
+    this._noiseBurst({ at: t, filter: 'highpass', fStart: 800, fEnd: 4000, dur: 0.28, vol: 0.14 });
+  };
+
+  /* 地層帯の切り替わり */
+  Sound.prototype.zone = function () {
+    if (!this.ctx) return;
+    var t = this._now();
+    [523, 659, 880].forEach(function (f, i) {
+      this._tone({ at: t + i * 0.09, type: 'triangle', f0: f, dur: 0.5, vol: 0.14 });
+    }, this);
+  };
+
+  /* 墜落 */
+  Sound.prototype.crash = function () {
+    if (!this.ctx) return;
+    var t = this._now();
+    this._tone({ at: t, type: 'sawtooth', f0: 320, f1: 40, dur: 0.9, vol: 0.4, exp: true });
+    this._noiseBurst({ at: t, fStart: 3000, fEnd: 90, dur: 0.8, vol: 0.32 });
+    [392, 349, 294, 233].forEach(function (f, i) {
+      this._tone({ at: t + 0.3 + i * 0.19, type: 'square', f0: f, dur: 0.3, vol: 0.16 });
+    }, this);
   };
 
   Sound.prototype.explosion = function (power) {
@@ -137,10 +197,6 @@
     this._tone({ at: t, type: 'triangle', f0: f, f1: f * 2, dur: 0.14, vol: 0.22, exp: true });
   };
 
-  Sound.prototype.breakBlock = function () {
-    if (!this.ctx) return;
-    this._noiseBurst({ fStart: 3000, fEnd: 500, dur: 0.14, vol: 0.16, q: 2 });
-  };
 
   Sound.prototype.pickup = function () {
     if (!this.ctx) return;
@@ -151,63 +207,17 @@
     }
   };
 
-  Sound.prototype.enemyDie = function () {
-    if (!this.ctx) return;
-    var t = this._now();
-    this._tone({ at: t, type: 'sawtooth', f0: 700, f1: 90, dur: 0.26, vol: 0.2, exp: true });
-    this._noiseBurst({ at: t, fStart: 3000, fEnd: 300, dur: 0.2, vol: 0.14 });
-  };
 
-  Sound.prototype.hurt = function () {
-    if (!this.ctx) return;
-    var t = this._now();
-    this._tone({ at: t, type: 'sawtooth', f0: 260, f1: 55, dur: 0.6, vol: 0.35, exp: true });
-    this._noiseBurst({ at: t, fStart: 1400, fEnd: 120, dur: 0.5, vol: 0.25 });
-  };
 
-  Sound.prototype.kick = function () {
-    if (!this.ctx) return;
-    this._tone({ type: 'square', f0: 200, f1: 520, dur: 0.1, vol: 0.16, exp: true });
-  };
 
-  Sound.prototype.doorOpen = function () {
-    if (!this.ctx) return;
-    var t = this._now();
-    [392, 523.25, 659.25, 783.99, 1046.5].forEach(function (f, i) {
-      this._tone({ at: t + i * 0.07, type: 'triangle', f0: f, dur: 0.3, vol: 0.16 });
-    }, this);
-  };
 
-  Sound.prototype.fanfare = function () {
-    if (!this.ctx) return;
-    var t = this._now();
-    var notes = [523.25, 659.25, 783.99, 1046.5, 783.99, 1046.5, 1318.5];
-    var times = [0, 0.11, 0.22, 0.33, 0.47, 0.58, 0.7];
-    for (var i = 0; i < notes.length; i++) {
-      this._tone({ at: t + times[i], type: 'square', f0: notes[i], dur: i === notes.length - 1 ? 0.7 : 0.16, vol: 0.2 });
-      this._tone({ at: t + times[i], type: 'triangle', f0: notes[i] / 2, dur: 0.2, vol: 0.14 });
-    }
-  };
 
-  Sound.prototype.gameOver = function () {
-    if (!this.ctx) return;
-    var t = this._now();
-    var notes = [523.25, 466.16, 415.30, 349.23];
-    for (var i = 0; i < notes.length; i++) {
-      this._tone({ at: t + i * 0.22, type: 'square', f0: notes[i], dur: 0.34, vol: 0.2 });
-      this._tone({ at: t + i * 0.22, type: 'sawtooth', f0: notes[i] / 2, dur: 0.34, vol: 0.12 });
-    }
-  };
 
   Sound.prototype.blip = function (hi) {
     if (!this.ctx) return;
     this._tone({ type: 'square', f0: hi ? 880 : 520, dur: 0.06, vol: 0.12 });
   };
 
-  Sound.prototype.tick = function () {
-    if (!this.ctx) return;
-    this._tone({ type: 'square', f0: 1400, dur: 0.04, vol: 0.08 });
-  };
 
   /* ---------- BGM ----------
      16分音符のシーケンサ。ベース + アルペジオ + ドラム。 */

@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<title>BLAST RUSH — 爆風で塗る陣取りアクション</title>
+<title>DEEP FALL — 落ち続ける爆弾アクション</title>
 <link rel="stylesheet" href="css/style.css">
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>💣</text></svg>">
 </head>
@@ -11,28 +11,26 @@
 <div id="app">
 
   <header id="hud">
-    <div class="hud-cell"><span class="hud-label">SCORE</span><span id="hud-score" class="hud-value">0</span></div>
-    <div class="hud-cell"><span class="hud-label">STAGE</span><span id="hud-stage" class="hud-value">1</span></div>
-    <div class="hud-cell"><span class="hud-label">TIME</span><span id="hud-time" class="hud-value">200</span></div>
-    <div class="hud-cell"><span class="hud-label">LIFE</span><span id="hud-life" class="hud-value">♥♥♥</span></div>
-    <div class="hud-cell hud-grow"><span class="hud-label">POWER</span><span id="hud-power" class="hud-value hud-small">💣1 🔥1</span></div>
+    <div class="hud-cell hud-depth">
+      <span class="hud-label">DEPTH</span>
+      <span id="hud-depth" class="hud-value">0<small>m</small></span>
+    </div>
+    <div class="hud-cell">
+      <span class="hud-label">SCORE</span>
+      <span id="hud-score" class="hud-value">0</span>
+    </div>
+    <div class="hud-cell">
+      <span class="hud-label">BEST</span>
+      <span id="hud-best" class="hud-value hud-small">0m</span>
+    </div>
+    <div class="hud-cell hud-grow">
+      <span class="hud-label">BOMBS</span>
+      <span id="hud-bombs" class="hud-value hud-small">💣💣💣</span>
+    </div>
   </header>
 
-  <div id="inkbar" title="塗り面積">
-    <div class="ink-track">
-      <div class="ink-fill ink-1" id="ink-1"></div>
-      <div class="ink-fill ink-2" id="ink-2"></div>
-      <div class="ink-target" id="ink-target"><span>ノルマ</span></div>
-    </div>
-    <div class="ink-nums">
-      <span class="ink-num n1" id="ink-num-1">0%</span>
-      <span class="ink-caption" id="ink-caption">塗り面積</span>
-      <span class="ink-num n2" id="ink-num-2">0%</span>
-    </div>
-  </div>
-
   <div id="stage-wrap">
-    <canvas id="game" width="600" height="520"></canvas>
+    <canvas id="game" width="600" height="640"></canvas>
 
     <div id="overlay" class="overlay">
       <div class="panel" id="panel"></div>
@@ -42,23 +40,16 @@
   </div>
 
   <div id="touch" aria-hidden="true">
-    <div class="pad">
-      <button class="tbtn" data-key="ArrowUp">▲</button>
-      <div class="pad-row">
-        <button class="tbtn" data-key="ArrowLeft">◀</button>
-        <button class="tbtn" data-key="ArrowDown">▼</button>
-        <button class="tbtn" data-key="ArrowRight">▶</button>
-      </div>
-    </div>
-    <div class="acts">
-      <button class="tbtn big" data-key=" ">💣</button>
-      <button class="tbtn" data-key="Enter">起爆</button>
-    </div>
+    <button class="tbtn wide" data-key="ArrowLeft">◀</button>
+    <button class="tbtn big" data-key=" ">💣</button>
+    <button class="tbtn" data-key="ArrowDown">▼</button>
+    <button class="tbtn wide" data-key="ArrowRight">▶</button>
   </div>
 
   <footer id="legend">
-    <span><b>1P</b> ←↑↓→ 移動 / <b>Space</b> 爆弾 / <b>Enter</b> 起爆</span>
-    <span><b>2P</b> WASD 移動 / <b>F</b> 爆弾 / <b>G</b> 起爆</span>
+    <span><b>← →</b> 横移動</span>
+    <span><b>↓</b> 急降下</span>
+    <span><b>Space</b> 爆弾を落とす</span>
     <span><b>P</b> ポーズ / <b>M</b> 音楽 / <b>N</b> 効果音</span>
   </footer>
 
@@ -67,7 +58,7 @@
 <script src="js/const.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/fx.js"></script>
-<script src="js/map.js"></script>
+<script src="js/world.js"></script>
 <script src="js/entities.js"></script>
 <script src="js/game.js"></script>
 <script src="js/main.js"></script>

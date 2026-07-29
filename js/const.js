@@ -1,77 +1,82 @@
 /* =========================================================
-   BLAST RUSH — 定数・共通ユーティリティ
+   DEEP FALL — 定数・共通ユーティリティ
+
+   落ち続けることだけが生きている条件。
+   地面に触れた瞬間に終わり。隙間は自分でこじ開ける。
    ========================================================= */
 var BM = window.BM || {};
 
 BM.TILE = 40;
-BM.COLS = 15;
-BM.ROWS = 13;
-BM.BOARD_W = BM.COLS * BM.TILE; // 600
-BM.BOARD_H = BM.ROWS * BM.TILE; // 520
+BM.COLS = 15;                 // 両端の 0 と 14 は縦坑の壁
+BM.PLAY_L = 1;                // 実際に通れる左端の列
+BM.PLAY_R = 13;               // 同・右端
+BM.VIEW_W = BM.COLS * BM.TILE;   // 600
+BM.VIEW_H = 640;                 // 16 行ぶん。先を読むために縦長にしてある
+BM.VIEW_ROWS = BM.VIEW_H / BM.TILE;
 
-/* タイル種別 */
-BM.T_EMPTY = 0; // 床
-BM.T_WALL  = 1; // 硬い壁（破壊不可）
-BM.T_BLOCK = 2; // ソフトブロック（破壊可）
+/* タイル */
+BM.T_EMPTY = 0;
+BM.T_ROCK  = 1;   // 触れたら終わり。爆風で砕ける
+BM.T_CRACK = 2;   // もろい岩。ぶつかると砕けて通り抜けられる（減速する）
+BM.T_BOMB  = 3;   // 岩に埋まった爆弾。爆風で誘爆して大穴が開く
+
+BM.isSolid = function (t) { return t === BM.T_ROCK || t === BM.T_BOMB; };
+BM.blocks  = function (t) { return t !== BM.T_EMPTY; };
 
 /* ゲーム状態 */
-BM.S_TITLE   = 'title';
-BM.S_PLAY    = 'play';
-BM.S_CLEAR   = 'clear';
-BM.S_DEAD    = 'dead';     // 残機を失った瞬間の演出
-BM.S_OVER    = 'over';
-BM.S_PAUSE   = 'pause';
-BM.S_VSROUND = 'vsround';
+BM.S_TITLE = 'title';
+BM.S_PLAY  = 'play';
+BM.S_OVER  = 'over';
+BM.S_PAUSE = 'pause';
 
-/* アイテム種別 */
+/* ---------- 落下 ---------- */
+BM.GRAVITY      = 1600;   // px/s^2
+BM.V_TERM_BASE  = 330;    // 終端速度の初期値
+BM.V_TERM_MAX   = 620;    // 深度で上がっていく上限
+BM.DIVE_MUL     = 1.75;   // 急降下中の終端速度倍率
+BM.MOVE_SPEED   = 320;    // 横移動の最高速度
+BM.MOVE_ACCEL   = 3000;
+BM.MOVE_FRICTION = 2400;
+BM.CRACK_COST   = 0.55;   // もろい岩を砕けた直後の落下速度の残り
+BM.PLAYER_R     = 12;
+
+/* ---------- 爆弾 ---------- */
+BM.BOMB_FALL_V   = 900;   // 爆弾はプレイヤーよりずっと速く落ちる
+BM.BOMB_POWER    = 2;     // 爆風の長さ（マス）
+BM.MAX_POWER     = 6;
+BM.START_BOMBS   = 3;
+BM.MAX_BOMBS     = 9;
+BM.FLAME_LIFE    = 0.42;
+BM.CHAIN_DELAY   = 0.055;
+
+/* ---------- 地層 ---------- */
+BM.LAYER_GAP_START = 9;   // 層と層の間隔（行）。深くなるほど詰まる
+BM.LAYER_GAP_MIN   = 5;
+BM.REACH_MARGIN    = 0.72; // 横移動が間に合う距離の安全率
+
+/* 深度で変わる地層の色。100m ごとに景色が変わる */
+BM.ZONES = [
+  { name: '表土',   rock: '#5b4a7a', rockDeep: '#33264d', bg1: '#1a1230', bg2: '#120c22', accent: '#9a7cc4' },
+  { name: '玄武岩', rock: '#3f5a72', rockDeep: '#22384a', bg1: '#0e1c2a', bg2: '#0a1420', accent: '#6fb0d8' },
+  { name: '結晶層', rock: '#6a4a7e', rockDeep: '#3b2450', bg1: '#1d1030', bg2: '#140a24', accent: '#cf8bf0' },
+  { name: '熱層',   rock: '#7a4438', rockDeep: '#4a2018', bg1: '#2a1210', bg2: '#1c0c0a', accent: '#ff8a5c' },
+  { name: '氷結層', rock: '#3f6e78', rockDeep: '#1f4048', bg1: '#0c2028', bg2: '#08161c', accent: '#7fe6e0' },
+  { name: '深淵',   rock: '#3a3550', rockDeep: '#1c1930', bg1: '#0d0a18', bg2: '#070510', accent: '#b0a8ff' }
+];
+BM.ZONE_ROWS = 100;
+BM.zoneAt = function (rows) {
+  return BM.ZONES[Math.min(BM.ZONES.length - 1, Math.floor(rows / BM.ZONE_ROWS))];
+};
+
+/* ---------- アイテム ---------- */
 BM.ITEMS = {
-  FIRE:   { key:'FIRE',   label:'火力アップ',   glyph:'🔥', color:'#ff7a3c' },
-  BOMB:   { key:'BOMB',   label:'爆弾アップ',   glyph:'💣', color:'#cfd4ff' },
-  SPEED:  { key:'SPEED',  label:'スピードアップ', glyph:'⚡', color:'#ffe14d' },
-  KICK:   { key:'KICK',   label:'キック',       glyph:'🦵', color:'#8affa0' },
-  PIERCE: { key:'PIERCE', label:'貫通爆弾',     glyph:'✴',  color:'#ff5ce0' },
-  REMOTE: { key:'REMOTE', label:'リモコン',     glyph:'📡', color:'#5ad2ff' },
-  HEART:  { key:'HEART',  label:'ライフ',       glyph:'♥',  color:'#ff5470' },
-  FULL:   { key:'FULL',   label:'フルファイア', glyph:'☀',  color:'#fff2a8' },
-  SHIELD: { key:'SHIELD', label:'シールド',     glyph:'🛡', color:'#a0f0ff' }
+  BOMB:   { key: 'BOMB',   label: '爆弾 +1',   glyph: '💣', color: '#ffd9a8' },
+  POWER:  { key: 'POWER',  label: '爆風アップ', glyph: '🔥', color: '#ff8a4c' },
+  SHIELD: { key: 'SHIELD', label: 'シールド',   glyph: '🛡', color: '#8ce8ff' },
+  SLOW:   { key: 'SLOW',   label: 'スロー',     glyph: '🌀', color: '#c9a6ff' }
 };
 
-/* ---------- インク（陣取り） ----------
-   このゲームの主役。爆風は「攻撃」であると同時に「塗り」であり、
-   勝敗もスコアも塗った面積で決まる。 */
-BM.INK_NONE = 0;
-BM.TEAMS = {
-  1: { id: 1, name: '1P',  ink: '#3fd0ff', deep: '#0f7fb0', glow: '90,210,255' },
-  2: { id: 2, name: '2P',  ink: '#ff6fc0', deep: '#a32f78', glow: '255,111,192' }
-};
-BM.ENEMY_TEAM = 2;               // 1人用では敵チームが 2
-BM.INK_SPEED_BONUS   = 0.30;     // 自陣の床は速い
-BM.INK_SPEED_PENALTY = -0.26;    // 敵陣の床は遅い
-BM.STAIN_INTERVAL = 0.8;         // 敵が床を汚す間隔（秒）
-                                 // 速すぎると開始直後から負けている感覚になる。
-                                 // 「放置すると削られる」が伝わる最小の速さに留める。
-BM.KILL_SPLASH = 2;              // 敵撃破時に飛び散るインクの半径（マス）
-BM.DEATH_WIPE = 1;               // やられたとき中立化される自陣の半径
-
-/* ステージのノルマ塗り率 */
-BM.targetRatio = function (stage) {
-  return BM.clamp(0.55 + Math.min(stage, 10) * 0.015, 0.55, 0.70);
-};
-
-/* バランス定数 */
-BM.BOMB_FUSE     = 2.2;   // 導火線（秒）
-BM.CHAIN_DELAY   = 0.055; // 誘爆までのタメ（連鎖の気持ちよさ）
-BM.FLAME_LIFE    = 0.46;  // 爆風の寿命（秒）
-BM.BASE_SPEED    = 118;   // px/秒
-BM.SPEED_STEP    = 22;
-BM.MAX_SPEED_LV  = 5;
-BM.MAX_POWER     = 9;
-BM.MAX_BOMBS     = 8;
-BM.INVULN_TIME   = 2.4;
-BM.KICK_SPEED    = 300;
-BM.COMBO_WINDOW  = 1.0;
-
-/* ---------- 保存（サンドボックス下では localStorage が例外を投げることがある） ---------- */
+/* ---------- 保存 ---------- */
 BM.store = {
   get: function (k, fallback) {
     try {
@@ -97,16 +102,13 @@ BM.shuffle = function (arr) {
   }
   return arr;
 };
-/* 指数的な追従（フレームレート非依存の lerp） */
 BM.damp = function (a, b, lambda, dt) { return BM.lerp(a, b, 1 - Math.exp(-lambda * dt)); };
 
-BM.cellOf  = function (px) { return Math.floor(px / BM.TILE); };
-BM.centerOf = function (c) { return c * BM.TILE + BM.TILE / 2; };
-BM.key = function (cx, cy) { return cy * BM.COLS + cx; };
+BM.colOf  = function (px) { return Math.floor(px / BM.TILE); };
+BM.rowOf  = function (py) { return Math.floor(py / BM.TILE); };
+BM.centerX = function (col) { return col * BM.TILE + BM.TILE / 2; };
+BM.centerY = function (row) { return row * BM.TILE + BM.TILE / 2; };
 
 BM.DIRS = [
-  { x: 1, y: 0, name: 'right' },
-  { x: -1, y: 0, name: 'left' },
-  { x: 0, y: 1, name: 'down' },
-  { x: 0, y: -1, name: 'up' }
+  { x: 1, y: 0 }, { x: -1, y: 0 }, { x: 0, y: 1 }, { x: 0, y: -1 }
 ];

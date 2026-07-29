@@ -1,11 +1,11 @@
 /* =========================================================
-   BLAST RUSH — 単一 HTML への同梱
+   DEEP FALL — 単一 HTML への同梱
      node tools/bundle.js
    index.html / css / js をそのまま 1 ファイルに束ねる。
    ビルドではなく単なる連結なので、ソースと挙動が食い違わない。
 
    出力は 2 種類：
-     dist/blast-rush.html   … 普通に開ける完全な HTML
+     dist/deep-fall.html   … 普通に開ける完全な HTML
      dist/artifact.html     … Artifact 公開用（<html>/<head>/<body> 抜き）
    ========================================================= */
 const fs = require('fs');
@@ -32,7 +32,7 @@ if (/<link rel="stylesheet"|<script src=/.test(out)) {
 }
 
 fs.mkdirSync(DIST, { recursive: true });
-fs.writeFileSync(path.join(DIST, 'blast-rush.html'), out);
+fs.writeFileSync(path.join(DIST, 'deep-fall.html'), out);
 
 // Artifact は <!doctype>/<html>/<head>/<body> を自前で被せるので、中身だけ渡す
 // favicon は Artifact 側のパラメータで指定するのでここでは持ち込まない
@@ -49,5 +49,5 @@ fs.writeFileSync(
 );
 
 const kb = n => (n / 1024).toFixed(1) + ' KB';
-console.log('dist/blast-rush.html', kb(fs.statSync(path.join(DIST, 'blast-rush.html')).size));
+console.log('dist/deep-fall.html', kb(fs.statSync(path.join(DIST, 'deep-fall.html')).size));
 console.log('dist/artifact.html  ', kb(fs.statSync(path.join(DIST, 'artifact.html')).size));
