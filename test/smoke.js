@@ -110,13 +110,19 @@ function installPilot() {
     if (p.vx < want - 10) I.keys['ArrowRight'] = true;
     else if (p.vx > want + 10) I.keys['ArrowLeft'] = true;
   }
+  // 通過数は checkPassed の前後で数える。
+  // update 全体を挟むと、その中の prune で層が消えて差分が負になる。
+  const ocp = BM.Game.prototype.checkPassed;
+  BM.Game.prototype.checkPassed = function () {
+    const n0 = this.world.layers.filter(l => l.passed).length;
+    ocp.call(this);
+    window.__passed += this.world.layers.filter(l => l.passed).length - n0;
+  };
   const orig = BM.Game.prototype.update;
   BM.Game.prototype.update = function (dt) {
     if (this.state === 'play') pilot();
     const was = this.player.alive;
-    const before = this.world.layers.filter(l => l.passed).length;
     const r = orig.call(this, dt);
-    window.__passed += this.world.layers.filter(l => l.passed).length - before;
     if (was && !this.player.alive) {
       const l = this.crashCell ? this.world.layerAt(this.crashCell.row) : null;
       window.__deaths.push({ depth: this.player.deepest, type: l ? l.type : '?' });
@@ -189,6 +195,44 @@ function installPilot() {
   deaths.forEach(d => { byType[d.type] = (byType[d.type] || 0) + 1; });
   console.log('  墜落した地層:', JSON.stringify(byType));
 
+  /* ---- 構造の通し確認 ----
+     無敵にして最後まで潜り、「本来なら死んでいた地点」を全部記録する。
+     途中で終わると、その先の構造が永久に検査されない。深いほど層の間隔も
+     穴の幅も詰まるので、浅いところだけ見ても意味がない。 */
+  const INSPECT_SEC = 70;
+  console.log(`  --- 構造の通し確認（無敵で ${INSPECT_SEC} 秒）---`);
+  await page.evaluate(() => {
+    BM.game.newRun(); BM.ui.hide();
+    BM.game.noDeath = true;
+    BM.game.deathLog = [];
+    window.__passed = 0;
+  });
+  await page.waitForTimeout(INSPECT_SEC * 1000);
+  const insp = await page.evaluate(() => ({
+    depth: BM.game.player.deepest,
+    passed: window.__passed,
+    log: BM.game.deathLog.map(d => ({ depth: d.depth, type: d.type, cells: d.cells }))
+  }));
+  await shot('06-inspect.png');
+  await page.evaluate(() => { BM.game.noDeath = false; });
+
+  const per100 = insp.log.length / Math.max(1, insp.passed) * 100;
+  console.log(`  到達 ${insp.depth}m / ${insp.passed} 層を通過 / 詰まり ${insp.log.length} 件` +
+              ` (100層あたり ${per100.toFixed(1)} 件)`);
+  if (insp.log.length) {
+    const byType = {}, byBand = {};
+    insp.log.forEach(d => {
+      byType[d.type] = (byType[d.type] || 0) + 1;
+      const band = Math.floor(d.depth / 100) * 100;
+      byBand[band] = (byBand[band] || 0) + 1;
+    });
+    console.log('    地層別:', JSON.stringify(byType));
+    console.log('    深度帯別:', JSON.stringify(byBand));
+    console.log('    最初の3件:', JSON.stringify(insp.log.slice(0, 3)));
+  }
+  check(`最深部まで通しても構造が破綻しない（${insp.depth}m まで確認）`, insp.depth >= 400);
+  check('詰まりが100層あたり2件未満', per100 < 2);
+
   /* ---- 地層の種類ごとに、本当に最後まで通れるか ----
      1種類だけを並べた縦坑を作り、自動操縦で潜らせる。
      どれか1つでも抜けられない型があれば、そこがゲームの穴になる。 */
@@ -226,6 +270,27 @@ function installPilot() {
   });
   console.log('  出現した地層の種類:', JSON.stringify(seen));
   check('隙間の作り方が9種類とも出る', Object.keys(seen).length >= 9);
+
+  /* ---- 次の層が、反応する前に画面に入っているか ----
+     層の間隔を「時間」で決めた結果、深部では行間が広がる。
+     カメラの先読みが足りないと、次の層が見えないまま突っ込むことになる。 */
+  check('どの深度でも次の層は画面内に見えている', await page.evaluate(() => {
+    const w = new BM.World();
+    let worst = 0, bad = 0;
+    for (let rows = 0; rows <= 600; rows += 10) {
+      const cfg = w.difficulty(rows);
+      const vt = w.vTerm(rows);
+      const camAbove = BM.VIEW_H * 0.30 - Math.min(120, vt * 0.14);
+      const below = BM.VIEW_H - camAbove;          // プレイヤーより下に見える範囲
+      const need = cfg.spacing * BM.TILE;          // 次の層までの距離
+      worst = Math.max(worst, need / below);
+      if (need > below * 0.95) bad++;
+    }
+    window.__camWorst = worst;
+    return bad === 0;
+  }));
+  console.log('  次の層までの距離 / 見えている範囲 の最悪値:',
+    (await page.evaluate(() => window.__camWorst)).toFixed(2));
 
   /* ---- 動く穴がプレイヤーより速く逃げないこと ---- */
   const tooFast = await page.evaluate(() => {

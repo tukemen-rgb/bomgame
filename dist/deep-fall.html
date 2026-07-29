@@ -346,8 +346,8 @@ BM.SHIELD_POWER  = 3;    // 発動時に開ける穴（通常の爆弾より大�
 BM.SHIELD_IFRAME = 0.7;  // 発動直後の無敵。厚い層で複数枚消費するのを防ぐ
 
 /* ---------- 地層 ---------- */
-BM.LAYER_GAP_START = 9;   // 層と層の間隔（行）。深くなるほど詰まる
-BM.LAYER_GAP_MIN   = 5;
+BM.LAYER_TIME_START = 1.15;  // 層と層の間隔（秒）。行数ではなく時間で決める
+BM.LAYER_TIME_MIN   = 0.78;  // 落下が速くなるぶん、行間は自然に広がる
 BM.REACH_MARGIN    = 0.72; // 横移動が間に合う距離の安全率
 
 /* 深度で変わる地層の色。100m ごとに景色が変わる */
@@ -1187,7 +1187,7 @@ BM.DIRS = [
     bombrock: function (layer, cfg) {
       layer.cells = newCells(BM.T_ROCK);
       // 以前はここが 1 固定で、深度に関わらず最難関の幅になっていた
-      var bw = Math.max(1, cfg.gapW - 1);
+      var bw = Math.max(2, cfg.gapW - 1);
       carve(layer.cells, layer.gapX, bw);
       var spots = BM.shuffle([L + 1, L + 3, L + 5, R - 5, R - 3, R - 1])
         .filter(function (c) { return Math.abs(c - layer.gapX) > 1; })
@@ -1242,11 +1242,21 @@ BM.DIRS = [
     return BM.lerp(BM.V_TERM_BASE, BM.V_TERM_MAX, BM.clamp(rows / 400, 0, 1));
   };
 
+  /* 難易度は「行数」ではなく「時間」で定義する。
+     落下速度は深度で上がるので、行数を一定に詰めていくと層と層の間の
+     時間が一気に潰れる（以前は 1.09秒 → 0.32秒 まで縮み、その間に横へ
+     動けるのが 1.86 マスしかなかった。穴の幅は 1 マスなのに）。
+     時間で決めれば、速くなるぶん行間は自然に広がる。 */
   World.prototype.difficulty = function (rows) {
-    var k = BM.clamp(rows / 260, 0, 1);
+    var k = BM.clamp(rows / 300, 0, 1);
+    var vt = this.vTerm(rows);
+    var gapTime = BM.lerp(BM.LAYER_TIME_START, BM.LAYER_TIME_MIN, k);
     return {
-      spacing: Math.round(BM.lerp(BM.LAYER_GAP_START, BM.LAYER_GAP_MIN, k)),
-      gapW: Math.max(1, Math.round(BM.lerp(3.4, 1.2, k)))
+      gapTime: gapTime,
+      spacing: Math.max(5, Math.round(gapTime * vt / TILE)),
+      // 当たり判定が 24px なので、1マス(40px)の穴は許容 ±8px しかない。
+      // 落下を止められない以上これは詰みなので、2マスを下限にする。
+      gapW: Math.max(2, Math.round(BM.lerp(3.4, 2.0, k)))
     };
   };
 
@@ -1613,6 +1623,11 @@ BM.DIRS = [
     this.zoneIndex = 0;
     this.bestDepth = Number(BM.store.get('deepfall.best', 0)) || 0;
     this.bestScore = Number(BM.store.get('deepfall.bestScore', 0)) || 0;
+    // 構造確認モード。死なずに最後まで通し、
+    // 「本来なら死んでいた地点」を全部記録する。
+    // 1回目の死で止まると、その先の構造が永久に検査されない。
+    this.noDeath = false;
+    this.deathLog = [];
     this.bgDust = [];
     for (var i = 0; i < 46; i++) {
       this.bgDust.push({ x: Math.random() * W, y: Math.random() * H, r: BM.rand(0.6, 2.2), s: BM.rand(0.15, 0.7) });
@@ -1635,6 +1650,7 @@ BM.DIRS = [
     this.chain = 0; this.chainT = 0;
     this.hitStop = 0;
     this.zoneIndex = 0;
+    this.deathLog = [];
     this.camY = this.player.y - H * 0.34;
     this.world.ensure(BM.rowOf(this.camY) + BM.VIEW_ROWS + 24);
     this.state = BM.S_PLAY;
@@ -1683,7 +1699,9 @@ BM.DIRS = [
     }
 
     // ---- カメラ：常に下へ。戻ることはない ----
-    var target = p.y - H * 0.34 + BM.clamp(p.vy * 0.10, 0, 90);
+    // 速く落ちるほど下を広く見せる。層の間隔は「時間」で決めているので、
+    // 速度が上がると行間が広がる。先読みを増やさないと次の層が画面外になる。
+    var target = p.y - H * 0.30 + BM.clamp(p.vy * 0.14, 0, 120);
     this.camY = Math.max(this.camY, BM.damp(this.camY, target, 9, dt));
     this.world.prune(BM.rowOf(this.camY));
 
@@ -1827,6 +1845,25 @@ BM.DIRS = [
   };
 
   Game.prototype.crash = function (p, col, row) {
+    if (this.noDeath) {
+      // 死なずに記録して突き抜ける
+      var l = this.world.layerAt(row);
+      this.deathLog.push({
+        depth: p.deepest, row: row, col: col,
+        type: l ? l.type : '?',
+        gapW: l ? (l.gapW || null) : null,
+        px: Math.round(p.x), vy: Math.round(p.vy),
+        cells: l && l.cells ? Array.prototype.join.call(l.cells, '') : ''
+      });
+      this.world.setTile(col, row, BM.T_EMPTY);
+      this.rubble(col, row);
+      p.vy = Math.max(180, p.vy * 0.7);
+      this.fx.addShake(9);
+      this.fx.addFlash(0.12, '255,80,80');
+      this.fx.text(p.x, p.y - 26, '×', '#ff5050', 22);
+      BM.sound.crack();
+      return;
+    }
     p.alive = false;
     this.crashCell = { col: col, row: row };
     this.fx.addShake(22);
@@ -1966,6 +2003,7 @@ BM.DIRS = [
     g.restore();
     this.drawDepthRail(g, z);
     this.drawVignette(g);
+    if (this.noDeath) this.drawInspectBadge(g);
 
     var ctx = this.ctx;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -2536,6 +2574,25 @@ BM.DIRS = [
     void x;
   };
 
+  /* 構造確認モードであることと、本来なら死んでいた回数を出す */
+  Game.prototype.drawInspectBadge = function (g) {
+    var n = this.deathLog.length;
+    g.save();
+    g.font = '700 11px system-ui, sans-serif';
+    var label = '構造確認モード（無敵）';
+    var sub = n === 0 ? '本来の死: 0' : ('本来の死: ' + n + '  最後=' + this.deathLog[n - 1].type);
+    var w = Math.max(g.measureText(label).width, g.measureText(sub).width) + 18;
+    g.fillStyle = 'rgba(10,6,18,.78)';
+    g.beginPath(); roundRect(g, 8, 8, w, 34, 7); g.fill();
+    g.strokeStyle = n ? 'rgba(255,90,70,.8)' : 'rgba(120,255,180,.7)';
+    g.lineWidth = 1.5; g.stroke();
+    g.fillStyle = n ? '#ff8a7a' : '#8affd0';
+    g.fillText(label, 17, 22);
+    g.fillStyle = 'rgba(230,220,255,.8)';
+    g.fillText(sub, 17, 35);
+    g.restore();
+  };
+
   Game.prototype.drawVignette = function (g) {
     var v = 0.4 + this.fx.vignette * 0.45;
     var gr = g.createRadialGradient(W / 2, H / 2, H * 0.32, W / 2, H / 2, H * 0.8);
@@ -2734,7 +2791,8 @@ BM.DIRS = [
         '<button data-act="resume">▶ 再開</button>' +
         '<button data-act="title">◀ タイトルへ</button>' +
         '</div>' +
-        '<div class="tips">音楽 <code>M</code> ／ 効果音 <code>N</code></div>'
+        '<div class="tips">音楽 <code>M</code> ／ 効果音 <code>N</code><br>' +
+        '構造確認モード（無敵で最後まで通す） <code>I</code></div>'
       );
     },
 
@@ -2801,6 +2859,11 @@ BM.DIRS = [
       return;
     }
     if (k === 'n') { BM.sound.sfxOn = !BM.sound.sfxOn; return; }
+    if (k === 'i') {   // 構造確認モード（無敵で最後まで通す）
+      game.noDeath = !game.noDeath;
+      ui.banner(game.noDeath ? '構造確認モード ON（無敵）' : '構造確認モード OFF');
+      return;
+    }
 
     switch (game.state) {
       case BM.S_TITLE:
@@ -2834,6 +2897,8 @@ BM.DIRS = [
     bindTouch();
     game = new BM.Game(document.getElementById('game'));
     BM.game = game;
+    // ?inspect=1 で、死なずに構造を最後まで見られるモードで起動する
+    if (/[?&]inspect=1/.test(location.search)) game.noDeath = true;
     ui.showTitle(game);
     requestAnimationFrame(frame);
   });

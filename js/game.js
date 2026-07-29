@@ -34,6 +34,11 @@
     this.zoneIndex = 0;
     this.bestDepth = Number(BM.store.get('deepfall.best', 0)) || 0;
     this.bestScore = Number(BM.store.get('deepfall.bestScore', 0)) || 0;
+    // 構造確認モード。死なずに最後まで通し、
+    // 「本来なら死んでいた地点」を全部記録する。
+    // 1回目の死で止まると、その先の構造が永久に検査されない。
+    this.noDeath = false;
+    this.deathLog = [];
     this.bgDust = [];
     for (var i = 0; i < 46; i++) {
       this.bgDust.push({ x: Math.random() * W, y: Math.random() * H, r: BM.rand(0.6, 2.2), s: BM.rand(0.15, 0.7) });
@@ -56,6 +61,7 @@
     this.chain = 0; this.chainT = 0;
     this.hitStop = 0;
     this.zoneIndex = 0;
+    this.deathLog = [];
     this.camY = this.player.y - H * 0.34;
     this.world.ensure(BM.rowOf(this.camY) + BM.VIEW_ROWS + 24);
     this.state = BM.S_PLAY;
@@ -104,7 +110,9 @@
     }
 
     // ---- カメラ：常に下へ。戻ることはない ----
-    var target = p.y - H * 0.34 + BM.clamp(p.vy * 0.10, 0, 90);
+    // 速く落ちるほど下を広く見せる。層の間隔は「時間」で決めているので、
+    // 速度が上がると行間が広がる。先読みを増やさないと次の層が画面外になる。
+    var target = p.y - H * 0.30 + BM.clamp(p.vy * 0.14, 0, 120);
     this.camY = Math.max(this.camY, BM.damp(this.camY, target, 9, dt));
     this.world.prune(BM.rowOf(this.camY));
 
@@ -248,6 +256,25 @@
   };
 
   Game.prototype.crash = function (p, col, row) {
+    if (this.noDeath) {
+      // 死なずに記録して突き抜ける
+      var l = this.world.layerAt(row);
+      this.deathLog.push({
+        depth: p.deepest, row: row, col: col,
+        type: l ? l.type : '?',
+        gapW: l ? (l.gapW || null) : null,
+        px: Math.round(p.x), vy: Math.round(p.vy),
+        cells: l && l.cells ? Array.prototype.join.call(l.cells, '') : ''
+      });
+      this.world.setTile(col, row, BM.T_EMPTY);
+      this.rubble(col, row);
+      p.vy = Math.max(180, p.vy * 0.7);
+      this.fx.addShake(9);
+      this.fx.addFlash(0.12, '255,80,80');
+      this.fx.text(p.x, p.y - 26, '×', '#ff5050', 22);
+      BM.sound.crack();
+      return;
+    }
     p.alive = false;
     this.crashCell = { col: col, row: row };
     this.fx.addShake(22);
@@ -387,6 +414,7 @@
     g.restore();
     this.drawDepthRail(g, z);
     this.drawVignette(g);
+    if (this.noDeath) this.drawInspectBadge(g);
 
     var ctx = this.ctx;
     ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -955,6 +983,25 @@
     }
     g.restore();
     void x;
+  };
+
+  /* 構造確認モードであることと、本来なら死んでいた回数を出す */
+  Game.prototype.drawInspectBadge = function (g) {
+    var n = this.deathLog.length;
+    g.save();
+    g.font = '700 11px system-ui, sans-serif';
+    var label = '構造確認モード（無敵）';
+    var sub = n === 0 ? '本来の死: 0' : ('本来の死: ' + n + '  最後=' + this.deathLog[n - 1].type);
+    var w = Math.max(g.measureText(label).width, g.measureText(sub).width) + 18;
+    g.fillStyle = 'rgba(10,6,18,.78)';
+    g.beginPath(); roundRect(g, 8, 8, w, 34, 7); g.fill();
+    g.strokeStyle = n ? 'rgba(255,90,70,.8)' : 'rgba(120,255,180,.7)';
+    g.lineWidth = 1.5; g.stroke();
+    g.fillStyle = n ? '#ff8a7a' : '#8affd0';
+    g.fillText(label, 17, 22);
+    g.fillStyle = 'rgba(230,220,255,.8)';
+    g.fillText(sub, 17, 35);
+    g.restore();
   };
 
   Game.prototype.drawVignette = function (g) {

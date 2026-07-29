@@ -165,7 +165,8 @@
         '<button data-act="resume">▶ 再開</button>' +
         '<button data-act="title">◀ タイトルへ</button>' +
         '</div>' +
-        '<div class="tips">音楽 <code>M</code> ／ 効果音 <code>N</code></div>'
+        '<div class="tips">音楽 <code>M</code> ／ 効果音 <code>N</code><br>' +
+        '構造確認モード（無敵で最後まで通す） <code>I</code></div>'
       );
     },
 
@@ -232,6 +233,11 @@
       return;
     }
     if (k === 'n') { BM.sound.sfxOn = !BM.sound.sfxOn; return; }
+    if (k === 'i') {   // 構造確認モード（無敵で最後まで通す）
+      game.noDeath = !game.noDeath;
+      ui.banner(game.noDeath ? '構造確認モード ON（無敵）' : '構造確認モード OFF');
+      return;
+    }
 
     switch (game.state) {
       case BM.S_TITLE:
@@ -265,6 +271,8 @@
     bindTouch();
     game = new BM.Game(document.getElementById('game'));
     BM.game = game;
+    // ?inspect=1 で、死なずに構造を最後まで見られるモードで起動する
+    if (/[?&]inspect=1/.test(location.search)) game.noDeath = true;
     ui.showTitle(game);
     requestAnimationFrame(frame);
   });

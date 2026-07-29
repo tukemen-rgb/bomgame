@@ -187,7 +187,7 @@
     bombrock: function (layer, cfg) {
       layer.cells = newCells(BM.T_ROCK);
       // 以前はここが 1 固定で、深度に関わらず最難関の幅になっていた
-      var bw = Math.max(1, cfg.gapW - 1);
+      var bw = Math.max(2, cfg.gapW - 1);
       carve(layer.cells, layer.gapX, bw);
       var spots = BM.shuffle([L + 1, L + 3, L + 5, R - 5, R - 3, R - 1])
         .filter(function (c) { return Math.abs(c - layer.gapX) > 1; })
@@ -242,11 +242,21 @@
     return BM.lerp(BM.V_TERM_BASE, BM.V_TERM_MAX, BM.clamp(rows / 400, 0, 1));
   };
 
+  /* 難易度は「行数」ではなく「時間」で定義する。
+     落下速度は深度で上がるので、行数を一定に詰めていくと層と層の間の
+     時間が一気に潰れる（以前は 1.09秒 → 0.32秒 まで縮み、その間に横へ
+     動けるのが 1.86 マスしかなかった。穴の幅は 1 マスなのに）。
+     時間で決めれば、速くなるぶん行間は自然に広がる。 */
   World.prototype.difficulty = function (rows) {
-    var k = BM.clamp(rows / 260, 0, 1);
+    var k = BM.clamp(rows / 300, 0, 1);
+    var vt = this.vTerm(rows);
+    var gapTime = BM.lerp(BM.LAYER_TIME_START, BM.LAYER_TIME_MIN, k);
     return {
-      spacing: Math.round(BM.lerp(BM.LAYER_GAP_START, BM.LAYER_GAP_MIN, k)),
-      gapW: Math.max(1, Math.round(BM.lerp(3.4, 1.2, k)))
+      gapTime: gapTime,
+      spacing: Math.max(5, Math.round(gapTime * vt / TILE)),
+      // 当たり判定が 24px なので、1マス(40px)の穴は許容 ±8px しかない。
+      // 落下を止められない以上これは詰みなので、2マスを下限にする。
+      gapW: Math.max(2, Math.round(BM.lerp(3.4, 2.0, k)))
     };
   };
 
