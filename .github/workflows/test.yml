@@ -1,0 +1,79 @@
+name: test
+
+# 実ブラウザで縦坑を潜らせる検査なので、CI でも同じものを走らせる。
+# 手で叩くのを忘れた時に壊れたまま進むのを防ぐのが目的。
+# 実際、開発中に smoke が見つけた不具合は5件あった（結晶が届かない／
+# 上限突破ぶんを持って🛡を拾うと減る／ご褒美の欠け／動く層の穴が塞がる／
+# 詰まりの数え方）。どれも目で見ただけでは分からないものだった。
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_dispatch:
+
+# 同じブランチに続けて push した時は、古い実行を止める
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # package-lock.json は追跡していないので npm ci は使えない
+      - name: 依存を入れる
+        run: npm install --no-audit --no-fund
+
+      # ブラウザ本体はキャッシュする（毎回落とすと遅い）
+      - name: Chromium をキャッシュ
+        id: pw-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/ms-playwright
+          key: pw-${{ runner.os }}-${{ hashFiles('package.json') }}
+
+      - name: Chromium を入れる
+        run: npx playwright install --with-deps chromium
+
+      # 生成の不変条件（0〜200,000m の静的検査）は速いので先に走らせる。
+      # ここが落ちているなら、実プレイを待つ意味がない。
+      - name: 構造監査
+        run: npm run audit
+
+      - name: 動作確認（自動操縦で実際に潜る）
+        run: npm test
+
+      # 落ちた時に何が映っていたか分からないと直せない
+      - name: スクリーンショットを残す
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screenshots
+          path: test/screenshots/
+          if-no-files-found: ignore
+          retention-days: 14
+
+      # 同梱版が生成できることも確かめる（公開しているのはこれ）
+      - name: 単一HTMLに同梱できるか
+        run: |
+          node tools/bundle.js
+          test -s dist/deep-fall.html
+          test -s dist/artifact.html
+
+      # dist はリポジトリに入っているので、作り直した結果とズレていたら知らせる。
+      # ズレたまま公開すると、遊べる版とソースが別物になる。
+      - name: 同梱版がソースと一致しているか
+        run: |
+          if ! git diff --quiet -- dist; then
+            echo '::error::dist/ がソースと一致しません。node tools/bundle.js を実行して commit してください'
+            git diff --stat -- dist
+            exit 1
+          fi

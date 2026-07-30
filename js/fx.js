@@ -28,6 +28,8 @@
   /* ---------- 入力系 ---------- */
 
   FX.prototype.addShake = function (amount, dx, dy) {
+    // 演出を抑える設定では画面を揺らさない。ここで止めれば呼び出し側は触らずに済む
+    if (BM.a11y.reduced) { this.shake = 0; return; }
     this.shake = Math.min(26, this.shake + amount);
     if (dx || dy) {
       var l = Math.hypot(dx, dy) || 1;
@@ -38,11 +40,16 @@
   };
 
   FX.prototype.addFlash = function (a, color) {
-    this.flash = Math.min(1, this.flash + a);
+    // 全画面フラッシュは光感受性で一番きついので、消すのではなく強さを落とす。
+    // 完全に消すと「何が起きたか」の手がかりも消えてしまう。
+    if (BM.a11y.reduced) a *= 0.22;
+    this.flash = Math.min(BM.a11y.reduced ? 0.22 : 1, this.flash + a);
     if (color) this.flashColor = color;
   };
 
   FX.prototype.addAberration = function (a) {
+    // RGB ずれは文字と岩の輪郭を二重に見せるので、抑える設定では出さない
+    if (BM.a11y.reduced) { this.aberration = 0; return; }
     // 強すぎると画面が読めなくなるので、上限は小さく・戻りは速く
     this.aberration = Math.min(5, this.aberration + a);
   };
@@ -63,6 +70,8 @@
   };
 
   FX.prototype.spawn = function (n, opt) {
+    // 破片の量も落とす。画面全体でチラつく点が減ると、それだけで楽になる
+    if (BM.a11y.reduced) n = Math.max(1, Math.round(n * 0.35));
     for (var i = 0; i < n; i++) {
       var ang = opt.angle != null
         ? opt.angle + BM.rand(-opt.spread, opt.spread)

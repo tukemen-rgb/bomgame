@@ -207,7 +207,9 @@ function installPilot() {
     console.log('    最初の3層:', JSON.stringify(jamRows.slice(0, 3).map(firstOf)));
   }
   check(`最深部まで通しても構造が破綻しない（${insp.depth}m まで確認）`, insp.depth >= 400);
-  check('抜けられない層が100層あたり2層未満', per100 < 2);
+  /* しきい値は audit と同じ。ここは自動操縦の腕も混ざる数字なので、
+     「明らかな崩壊」を捕まえる位置に置く（生成の厳しい検査は audit の静的検査）。 */
+  check(`抜けられない層が100層あたり5層未満（${per100.toFixed(1)}層）`, per100 < 5);
 
   /* ---- 地層の種類ごとに、本当に最後まで通れるか ----
      1種類だけを並べた縦坑を作り、自動操縦で潜らせる。
@@ -502,11 +504,13 @@ function installPilot() {
     g.player.slow = g.player.slowMax = 6;
     g.coinRun = 3; g.coinRunT = 1.2;
     const on = g.statusRows();
-    for (let i = 0; i < 600; i++) g.update(1 / 120);   // 5秒進める
+    // 残り 0.5 秒あたりまで進める。ちょうど境界（残り1.0秒）で測ると
+    // 浮動小数の誤差で点滅する/しないが揺れて、検査にならない
+    for (let i = 0; i < 660; i++) g.update(1 / 120);
     const late = g.statusRows();
     g.player.power = BM.MAX_POWER;
     const full = g.statusRows().find(r => r.key === 'power');
-    for (let i = 0; i < 200; i++) g.update(1 / 120);   // スローを切らす
+    for (let i = 0; i < 240; i++) g.update(1 / 120);   // 確実に切らす
     const after = g.statusRows().map(r => r.key);
     return {
       idle, after,
@@ -529,7 +533,7 @@ function installPilot() {
     stat.idle.indexOf('slow') < 0 && stat.keys.indexOf('slow') >= 0 && stat.after.indexOf('slow') < 0);
   check(`スローの残り時間が減る（${stat.slow.text} → ${stat.slowLate.text}）`,
     stat.slowLate.value < stat.slow.value && stat.slowLate.frac < stat.slow.frac);
-  check('切れる直前に点滅する', stat.slowLate.warn === true);
+  check(`切れる直前に点滅する（残り ${stat.slowLate.text}）`, stat.slowLate.warn === true);
   check('結晶の倍率は連続中だけ出る',
     stat.idle.indexOf('coin') < 0 && stat.coin.text === '×3');
 
@@ -559,6 +563,91 @@ function installPilot() {
   check('表示は値によって絵が変わる（＝本当に描かれている）', drawn.a !== drawn.b && drawn.c > drawn.b);
   check(`スロー中は画面の縁が紫に振れる（青 ${drawn.cold[1]}→${drawn.warm[1]}）`,
     drawn.warm[1] > drawn.cold[1]);
+
+  /* ---- 演出を抑える設定 ----
+     画面揺れ・全画面フラッシュ・RGBずれは、人によっては本当に遊べなくなる。
+     OS の設定を既定として尊重できているか、手動でも切り替わるか、
+     そして「抑えたのに実際は出ている」ことがないかを見る。 */
+  console.log('  --- 演出を抑える設定 ---');
+  {
+    const blast = () => {
+      const g = BM.game;
+      g.newRun(); BM.ui.hide();
+      g.fx.clear();
+      g.blast(7, BM.rowOf(g.player.y) + 4, 3, false);
+      return { shake: g.fx.shake, flash: g.fx.flash, ab: g.fx.aberration,
+               parts: g.fx.particles.length, reduced: BM.a11y.reduced };
+    };
+    // 通常（対照）
+    const normal = await page.evaluate(bl => { BM.a11y.set(false); return eval('(' + bl + ')')(); }, blast.toString());
+    // 手動で抑える
+    const off = await page.evaluate(bl => { BM.a11y.set(true); return eval('(' + bl + ')')(); }, blast.toString());
+    console.log(`  通常  : 揺れ ${normal.shake.toFixed(1)} / フラッシュ ${normal.flash.toFixed(2)}` +
+                ` / 色ずれ ${normal.ab.toFixed(1)} / 破片 ${normal.parts}`);
+    console.log(`  抑える: 揺れ ${off.shake.toFixed(1)} / フラッシュ ${off.flash.toFixed(2)}` +
+                ` / 色ずれ ${off.ab.toFixed(1)} / 破片 ${off.parts}`);
+    check('通常は揺れ・フラッシュ・色ずれが出る（対照）',
+      normal.shake > 0 && normal.flash > 0 && normal.ab > 0);
+    check('抑えると画面が揺れない', off.shake === 0);
+    check('抑えると色ずれが出ない', off.ab === 0);
+    check(`抑えるとフラッシュが弱くなる（${normal.flash.toFixed(2)} → ${off.flash.toFixed(2)}）`,
+      off.flash > 0 && off.flash < normal.flash * 0.4);
+    check(`抑えると破片が減る（${normal.parts} → ${off.parts}）`, off.parts < normal.parts);
+
+    // CSS 側（動きと点滅）も止まっているか
+    const css = await page.evaluate(() => {
+      const out = {};
+      out.cls = document.documentElement.classList.contains('reduce-motion');
+      const b = document.getElementById('combo-banner');
+      b.classList.add('show');
+      out.banner = getComputedStyle(b).animationName;
+      const t = document.getElementById('reward-toast');
+      t.classList.add('show');
+      out.toast = getComputedStyle(t).animationName;
+      const v = document.getElementById('hud-score');
+      v.classList.add('warn');
+      out.warn = getComputedStyle(v).animationName;
+      v.classList.remove('warn');
+      return out;
+    });
+    console.log(`  CSS: クラス ${css.cls} / バナー ${css.banner} / トースト ${css.toast} / 点滅 ${css.warn}`);
+    check('抑えると html に reduce-motion が付く', css.cls === true);
+    check('抑えると弾むアニメが淡いフェードに変わる',
+      css.banner === 'rmFade' && css.toast === 'rmFade');
+    check('抑えると点滅が止まる', css.warn === 'none');
+
+    // 設定が残るか／OS の設定を既定にできているか
+    const persist = await page.evaluate(() => {
+      BM.a11y.set(true);
+      const saved = BM.store.get(BM.a11y.KEY, null);
+      // 保存を消すと OS の設定に従う
+      try { window.localStorage.removeItem(BM.a11y.KEY); } catch (e) { /* noop */ }
+      return { saved, pref: BM.a11y.pref(), applied: BM.a11y.apply(), os: BM.a11y.osReduced() };
+    });
+    console.log(`  保存 ${JSON.stringify(persist.saved)} / 未保存なら OS の設定 ${persist.os} を使う → ${persist.applied}`);
+    check('設定が保存される', persist.saved === '1');
+    check('未保存なら OS の設定に従う', persist.pref === null && persist.applied === persist.os);
+
+    // OS 側が reduce の環境で、最初から抑えた状態で始まるか
+    const ctx = await browser.newContext({ reducedMotion: 'reduce', viewport: { width: 700, height: 800 } });
+    const p2 = await ctx.newPage();
+    await p2.goto(`http://localhost:${PORT}/index.html?noads=1`);
+    await p2.waitForTimeout(400);
+    const osFirst = await p2.evaluate(() => ({
+      reduced: BM.a11y.reduced,
+      cls: document.documentElement.classList.contains('reduce-motion'),
+      pref: BM.a11y.pref()
+    }));
+    console.log(`  OS が reduce の環境: 抑制 ${osFirst.reduced} / クラス ${osFirst.cls} / 保存 ${osFirst.pref}`);
+    check('OS の「視差を減らす」を既定として尊重する',
+      osFirst.reduced === true && osFirst.cls === true && osFirst.pref === null);
+    // OS が reduce でも、手動で「出す」を選べる
+    const manualOn = await p2.evaluate(() => { BM.a11y.set(false); return BM.a11y.reduced; });
+    check('OS が reduce でも手動で出す側に戻せる', manualOn === false);
+    await ctx.close();
+
+    await page.evaluate(() => { BM.a11y.set(false); });
+  }
 
   /* ---- 爆弾で掘れること ---- */
   const dug = await page.evaluate(() => {

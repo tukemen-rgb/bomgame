@@ -1246,8 +1246,10 @@
     for (i = 0; i < rows.length; i++) {
       r = rows[i];
       var y = y0 + PAD + 2 + i * rh;
-      // 点滅は「切れる直前」だけ。常時光らせると意味が薄れる
-      var a = r.warn ? (0.45 + 0.55 * Math.abs(Math.sin(this.stateT * 9))) : 1;
+      // 点滅は「切れる直前」だけ。常時光らせると意味が薄れる。
+      // 抑える設定では点滅させず、色を落として「もう少しで切れる」を示す
+      var a = 1;
+      if (r.warn) a = BM.a11y.reduced ? 0.6 : (0.45 + 0.55 * Math.abs(Math.sin(this.stateT * 9)));
       g.globalAlpha = a;
       g.font = LABEL_F;
       g.textAlign = 'left'; g.textBaseline = 'middle';

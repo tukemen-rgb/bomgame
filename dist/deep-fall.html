@@ -361,6 +361,34 @@ canvas#game{
   font-size:11px;color:var(--dim);
 }
 #legend b{color:#ffe9a8;font-weight:700}
+
+/* ---------- 演出を抑える設定 ----------
+   クラスは JS（BM.a11y）が付ける。OS の prefers-reduced-motion を既定にしつつ、
+   OS 設定を変えられない人が手動でも切り替えられるようにするため、
+   メディアクエリではなくクラスで一元管理している。
+
+   ここで止めるのは「動き」と「点滅」。色や配置は変えない。
+   レイアウトまで変えると、抑えた人だけ別の画面を見ることになる。 */
+.reduce-motion #combo-banner.show,
+.reduce-motion #reward-toast.show{
+  animation:none;
+  opacity:1;
+}
+/* 動かさない代わりに、出て消えるだけにする */
+.reduce-motion #combo-banner.show{ animation:rmFade 1.2s linear forwards; transform:translate(-50%,-50%) }
+.reduce-motion #reward-toast.show{ animation:rmFade 2.6s linear forwards; transform:translate(-50%,-50%) }
+@keyframes rmFade{ 0%{opacity:0} 6%{opacity:1} 88%{opacity:1} 100%{opacity:0} }
+
+/* 点滅をやめる。低残弾や記録更新は色だけで示す */
+.reduce-motion .hud-value.warn,
+.reduce-motion .hud-ammo.empty .ammo-count,
+.reduce-motion .blink{ animation:none; opacity:1 }
+/* 拡大縮小をやめる */
+.reduce-motion .hud-value.bump,
+.reduce-motion .hud-ammo.bump .ammo-count,
+.reduce-motion .hud-shield.fire .pips{ animation:none; transform:none; filter:none }
+.reduce-motion .menu button:active{ transform:none }
+.reduce-motion .ad-creative{ transition:none }
 </style>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>💣</text></svg>">
 </head>
@@ -415,7 +443,7 @@ canvas#game{
     <span><b>← →</b> 横移動</span>
     <span><b>↓</b> 急降下</span>
     <span><b>Space</b> 爆弾を落とす</span>
-    <span><b>P</b> ポーズ / <b>M</b> 音楽 / <b>N</b> 効果音</span>
+    <span><b>P</b> ポーズ / <b>M</b> 音楽 / <b>N</b> 効果音 / <b>R</b> 演出を抑える</span>
   </footer>
 
 </div>
@@ -559,6 +587,57 @@ BM.store = {
   },
   set: function (k, v) {
     try { window.localStorage.setItem(k, v); } catch (e) { /* 保存できなくても遊べる */ }
+  }
+};
+
+/* ---------- 演出を抑える設定 ----------
+   このゲームは画面揺れ・全画面フラッシュ・RGBずれを使っている。
+   これは人によっては本当に遊べなくなる（前庭系の症状・光感受性）。
+   OS の「視差を減らす」設定を既定として尊重し、そのうえで
+   OS の設定を変えられない人のために手動でも切り替えられるようにする。
+
+   保存は3状態：未保存＝OSまかせ / '1'＝常に抑える / '0'＝常に出す。 */
+BM.a11y = {
+  reduced: false,
+  KEY: 'deepfall.reduce',
+
+  osReduced: function () {
+    try {
+      return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    } catch (e) { return false; }
+  },
+
+  pref: function () {
+    var v = BM.store.get(this.KEY, null);
+    return v === '1' ? true : (v === '0' ? false : null);
+  },
+
+  /* 抑えるかどうかを決めて反映する。CSS 側はこのクラスだけを見る */
+  apply: function () {
+    var p = this.pref();
+    this.reduced = (p === null) ? this.osReduced() : p;
+    try {
+      document.documentElement.classList.toggle('reduce-motion', this.reduced);
+    } catch (e) { /* DOM 前でも落ちないように */ }
+    return this.reduced;
+  },
+
+  set: function (v) {
+    BM.store.set(this.KEY, v ? '1' : '0');
+    return this.apply();
+  },
+
+  toggle: function () { return this.set(!this.reduced); },
+
+  /* OS 側の設定変更に追従する（手動で決めている時は触らない） */
+  watch: function () {
+    var self = this;
+    try {
+      var mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+      var on = function () { if (self.pref() === null) self.apply(); };
+      if (mq.addEventListener) mq.addEventListener('change', on);
+      else if (mq.addListener) mq.addListener(on);
+    } catch (e) { /* 対応していない環境ではOSの初期値だけ見る */ }
   }
 };
 
@@ -947,6 +1026,8 @@ BM.DIRS = [
   /* ---------- 入力系 ---------- */
 
   FX.prototype.addShake = function (amount, dx, dy) {
+    // 演出を抑える設定では画面を揺らさない。ここで止めれば呼び出し側は触らずに済む
+    if (BM.a11y.reduced) { this.shake = 0; return; }
     this.shake = Math.min(26, this.shake + amount);
     if (dx || dy) {
       var l = Math.hypot(dx, dy) || 1;
@@ -957,11 +1038,16 @@ BM.DIRS = [
   };
 
   FX.prototype.addFlash = function (a, color) {
-    this.flash = Math.min(1, this.flash + a);
+    // 全画面フラッシュは光感受性で一番きついので、消すのではなく強さを落とす。
+    // 完全に消すと「何が起きたか」の手がかりも消えてしまう。
+    if (BM.a11y.reduced) a *= 0.22;
+    this.flash = Math.min(BM.a11y.reduced ? 0.22 : 1, this.flash + a);
     if (color) this.flashColor = color;
   };
 
   FX.prototype.addAberration = function (a) {
+    // RGB ずれは文字と岩の輪郭を二重に見せるので、抑える設定では出さない
+    if (BM.a11y.reduced) { this.aberration = 0; return; }
     // 強すぎると画面が読めなくなるので、上限は小さく・戻りは速く
     this.aberration = Math.min(5, this.aberration + a);
   };
@@ -982,6 +1068,8 @@ BM.DIRS = [
   };
 
   FX.prototype.spawn = function (n, opt) {
+    // 破片の量も落とす。画面全体でチラつく点が減ると、それだけで楽になる
+    if (BM.a11y.reduced) n = Math.max(1, Math.round(n * 0.35));
     for (var i = 0; i < n; i++) {
       var ang = opt.angle != null
         ? opt.angle + BM.rand(-opt.spread, opt.spread)
@@ -3479,8 +3567,10 @@ BM.DIRS = [
     for (i = 0; i < rows.length; i++) {
       r = rows[i];
       var y = y0 + PAD + 2 + i * rh;
-      // 点滅は「切れる直前」だけ。常時光らせると意味が薄れる
-      var a = r.warn ? (0.45 + 0.55 * Math.abs(Math.sin(this.stateT * 9))) : 1;
+      // 点滅は「切れる直前」だけ。常時光らせると意味が薄れる。
+      // 抑える設定では点滅させず、色を落として「もう少しで切れる」を示す
+      var a = 1;
+      if (r.warn) a = BM.a11y.reduced ? 0.6 : (0.45 + 0.55 * Math.abs(Math.sin(this.stateT * 9)));
       g.globalAlpha = a;
       g.font = LABEL_F;
       g.textAlign = 'left'; g.textBaseline = 'middle';
@@ -3726,6 +3816,8 @@ BM.DIRS = [
         '<b style="color:#c9a6ff">スロー</b>の残り時間（切れる直前に点滅する。スロー中は画面の縁が紫）／' +
         '<b style="color:#ffe066">結晶</b>の連続倍率（続けて拾うと最大5倍）。</p>' +
         '<p>100m ごとに地層が変わり、落下速度も層の間隔も上がっていく。</p>' +
+        '<p><code>R</code> で<b>演出を抑える</b>（画面揺れ・全画面フラッシュ・色ずれを止める）。' +
+        'OS の「視差を減らす」設定が入っていれば最初から抑えた状態で始まる。</p>' +
         '<p><b style="color:#ffe066">200m ごとに「ご褒美の間」がある。</b>' +
         'その区間だけ岩が無く、爆弾の補給・シールド・爆風アップ・結晶（💠 点数）が' +
         '待っている。中身は4種を巡回し、<b>1000m ごとは全部盛りの大空洞</b>、' +
@@ -3745,6 +3837,8 @@ BM.DIRS = [
         '<button data-act="title">◀ タイトルへ</button>' +
         '</div>' +
         '<div class="tips">音楽 <code>M</code> ／ 効果音 <code>N</code><br>' +
+        '演出を抑える <code>R</code>（画面揺れ・フラッシュ・色ずれ）… <b>' +
+        (BM.a11y.reduced ? 'ON' : 'OFF') + '</b><br>' +
         '構造確認モード（無敵） <code>I</code> ／ 早送り <code>T</code></div>'
       );
     },
@@ -3820,6 +3914,12 @@ BM.DIRS = [
       return;
     }
     if (k === 'n') { BM.sound.sfxOn = !BM.sound.sfxOn; return; }
+    if (k === 'r') {   // 演出（画面揺れ・フラッシュ・RGBずれ）を抑える
+      var red = BM.a11y.toggle();
+      ui.banner(red ? '演出を抑える ON' : '演出を抑える OFF');
+      if (game.state === BM.S_PAUSE) ui.showPause();
+      return;
+    }
     if (k === 'i') {   // 構造確認モード（無敵。操作は自分でする）
       game.noDeath = !game.noDeath;
       if (!game.noDeath) BM.autopilot.enabled = false;
@@ -3871,6 +3971,9 @@ BM.DIRS = [
   }
 
   window.addEventListener('load', function () {
+    // 演出を抑えるかどうかは、何かを描く前に決めておく
+    BM.a11y.apply();
+    BM.a11y.watch();
     ui.cache();
     bindTouch();
     game = new BM.Game(document.getElementById('game'));
@@ -3879,6 +3982,9 @@ BM.DIRS = [
     if (/[?&]inspect=1/.test(location.search)) game.noDeath = true;
     // ?noads=1 で広告を止める（テストや動作確認用）
     if (/[?&]noads=1/.test(location.search)) BM.ads.enabled = false;
+    // ?reduce=1 / ?reduce=0 … 演出の抑制を明示する（検査用。保存もされる）
+    var rm = /[?&]reduce=([01])/.exec(location.search);
+    if (rm) BM.a11y.set(rm[1] === '1');
     ui.showTitle(game);
     requestAnimationFrame(frame);
   });

@@ -185,6 +185,8 @@
         '<b style="color:#c9a6ff">スロー</b>の残り時間（切れる直前に点滅する。スロー中は画面の縁が紫）／' +
         '<b style="color:#ffe066">結晶</b>の連続倍率（続けて拾うと最大5倍）。</p>' +
         '<p>100m ごとに地層が変わり、落下速度も層の間隔も上がっていく。</p>' +
+        '<p><code>R</code> で<b>演出を抑える</b>（画面揺れ・全画面フラッシュ・色ずれを止める）。' +
+        'OS の「視差を減らす」設定が入っていれば最初から抑えた状態で始まる。</p>' +
         '<p><b style="color:#ffe066">200m ごとに「ご褒美の間」がある。</b>' +
         'その区間だけ岩が無く、爆弾の補給・シールド・爆風アップ・結晶（💠 点数）が' +
         '待っている。中身は4種を巡回し、<b>1000m ごとは全部盛りの大空洞</b>、' +
@@ -204,6 +206,8 @@
         '<button data-act="title">◀ タイトルへ</button>' +
         '</div>' +
         '<div class="tips">音楽 <code>M</code> ／ 効果音 <code>N</code><br>' +
+        '演出を抑える <code>R</code>（画面揺れ・フラッシュ・色ずれ）… <b>' +
+        (BM.a11y.reduced ? 'ON' : 'OFF') + '</b><br>' +
         '構造確認モード（無敵） <code>I</code> ／ 早送り <code>T</code></div>'
       );
     },
@@ -279,6 +283,12 @@
       return;
     }
     if (k === 'n') { BM.sound.sfxOn = !BM.sound.sfxOn; return; }
+    if (k === 'r') {   // 演出（画面揺れ・フラッシュ・RGBずれ）を抑える
+      var red = BM.a11y.toggle();
+      ui.banner(red ? '演出を抑える ON' : '演出を抑える OFF');
+      if (game.state === BM.S_PAUSE) ui.showPause();
+      return;
+    }
     if (k === 'i') {   // 構造確認モード（無敵。操作は自分でする）
       game.noDeath = !game.noDeath;
       if (!game.noDeath) BM.autopilot.enabled = false;
@@ -330,6 +340,9 @@
   }
 
   window.addEventListener('load', function () {
+    // 演出を抑えるかどうかは、何かを描く前に決めておく
+    BM.a11y.apply();
+    BM.a11y.watch();
     ui.cache();
     bindTouch();
     game = new BM.Game(document.getElementById('game'));
@@ -338,6 +351,9 @@
     if (/[?&]inspect=1/.test(location.search)) game.noDeath = true;
     // ?noads=1 で広告を止める（テストや動作確認用）
     if (/[?&]noads=1/.test(location.search)) BM.ads.enabled = false;
+    // ?reduce=1 / ?reduce=0 … 演出の抑制を明示する（検査用。保存もされる）
+    var rm = /[?&]reduce=([01])/.exec(location.search);
+    if (rm) BM.a11y.set(rm[1] === '1');
     ui.showTitle(game);
     requestAnimationFrame(frame);
   });

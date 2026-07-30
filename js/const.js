@@ -139,6 +139,57 @@ BM.store = {
   }
 };
 
+/* ---------- 演出を抑える設定 ----------
+   このゲームは画面揺れ・全画面フラッシュ・RGBずれを使っている。
+   これは人によっては本当に遊べなくなる（前庭系の症状・光感受性）。
+   OS の「視差を減らす」設定を既定として尊重し、そのうえで
+   OS の設定を変えられない人のために手動でも切り替えられるようにする。
+
+   保存は3状態：未保存＝OSまかせ / '1'＝常に抑える / '0'＝常に出す。 */
+BM.a11y = {
+  reduced: false,
+  KEY: 'deepfall.reduce',
+
+  osReduced: function () {
+    try {
+      return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    } catch (e) { return false; }
+  },
+
+  pref: function () {
+    var v = BM.store.get(this.KEY, null);
+    return v === '1' ? true : (v === '0' ? false : null);
+  },
+
+  /* 抑えるかどうかを決めて反映する。CSS 側はこのクラスだけを見る */
+  apply: function () {
+    var p = this.pref();
+    this.reduced = (p === null) ? this.osReduced() : p;
+    try {
+      document.documentElement.classList.toggle('reduce-motion', this.reduced);
+    } catch (e) { /* DOM 前でも落ちないように */ }
+    return this.reduced;
+  },
+
+  set: function (v) {
+    BM.store.set(this.KEY, v ? '1' : '0');
+    return this.apply();
+  },
+
+  toggle: function () { return this.set(!this.reduced); },
+
+  /* OS 側の設定変更に追従する（手動で決めている時は触らない） */
+  watch: function () {
+    var self = this;
+    try {
+      var mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+      var on = function () { if (self.pref() === null) self.apply(); };
+      if (mq.addEventListener) mq.addEventListener('change', on);
+      else if (mq.addListener) mq.addListener(on);
+    } catch (e) { /* 対応していない環境ではOSの初期値だけ見る */ }
+  }
+};
+
 /* ---------- 汎用ヘルパ ---------- */
 BM.clamp = function (v, a, b) { return v < a ? a : (v > b ? b : v); };
 BM.lerp  = function (a, b, t) { return a + (b - a) * t; };

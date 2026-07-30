@@ -354,3 +354,31 @@ canvas#game{
   font-size:11px;color:var(--dim);
 }
 #legend b{color:#ffe9a8;font-weight:700}
+
+/* ---------- 演出を抑える設定 ----------
+   クラスは JS（BM.a11y）が付ける。OS の prefers-reduced-motion を既定にしつつ、
+   OS 設定を変えられない人が手動でも切り替えられるようにするため、
+   メディアクエリではなくクラスで一元管理している。
+
+   ここで止めるのは「動き」と「点滅」。色や配置は変えない。
+   レイアウトまで変えると、抑えた人だけ別の画面を見ることになる。 */
+.reduce-motion #combo-banner.show,
+.reduce-motion #reward-toast.show{
+  animation:none;
+  opacity:1;
+}
+/* 動かさない代わりに、出て消えるだけにする */
+.reduce-motion #combo-banner.show{ animation:rmFade 1.2s linear forwards; transform:translate(-50%,-50%) }
+.reduce-motion #reward-toast.show{ animation:rmFade 2.6s linear forwards; transform:translate(-50%,-50%) }
+@keyframes rmFade{ 0%{opacity:0} 6%{opacity:1} 88%{opacity:1} 100%{opacity:0} }
+
+/* 点滅をやめる。低残弾や記録更新は色だけで示す */
+.reduce-motion .hud-value.warn,
+.reduce-motion .hud-ammo.empty .ammo-count,
+.reduce-motion .blink{ animation:none; opacity:1 }
+/* 拡大縮小をやめる */
+.reduce-motion .hud-value.bump,
+.reduce-motion .hud-ammo.bump .ammo-count,
+.reduce-motion .hud-shield.fire .pips{ animation:none; transform:none; filter:none }
+.reduce-motion .menu button:active{ transform:none }
+.reduce-motion .ad-creative{ transition:none }
