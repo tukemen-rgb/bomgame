@@ -238,7 +238,9 @@ function installPilot() {
      節目が1つでも欠けていないこと・そこでは絶対に死なないことを見る。 */
   console.log('  --- ご褒美の間（200m ごと・底なし）---');
   const MC = await page.evaluate(() => ({
-    rows: BM.MILESTONE_ROWS, bonus: BM.MILESTONE_BONUS, kinds: BM.REWARDS.length + 1
+    rows: BM.MILESTONE_ROWS, bonus: BM.MILESTONE_BONUS, kinds: BM.REWARDS.length + 1,
+    shieldMax: BM.SHIELD_MAX, shieldCap: BM.SHIELD_CAP, maxPower: BM.MAX_POWER,
+    bigSpan: BM.BIG_SPAN, bonusCap: BM.MILESTONE_BONUS * BM.MILESTONE_BONUS_CAP
   }));
   const ms = await page.evaluate(() => {
     const w = new BM.World(); w.reset();
@@ -323,6 +325,69 @@ function installPilot() {
   check('ご褒美を通ると実際に補給される', grant.bombs > grant.before.bombs);
   check(`到達ボーナス ${MC.bonus} が入る`, grant.score >= grant.before.score + MC.bonus);
   check('もらった内容が画面に出る', grant.gotToast);
+
+  /* ---- 10000m ごとの別格「地核の間」 ----
+     4種＋大空洞の巡回だけだと 2000m と 20000m で質的な違いが無くなる。
+     ここだけは通常の上限を超えるので、超えたことが本当に効いているかを見る。 */
+  const EP = await page.evaluate(() => {
+    const w = new BM.World(); w.reset();
+    const at = d => {
+      const m = d / BM.MILESTONE_ROWS;
+      return { depth: d, key: w.rewardAt(m).key, span: w.rewardSpan(m), bonus: w.rewardBonus(m) };
+    };
+    const list = [1000, 5000, 9800, 10000, 10200, 20000, 30000, 50000, 100000].map(at);
+    // 実際に 20000m を生成して中身を数える
+    const start = 19600;
+    w.nextRow = start; w.lastRow = start; w.mileDone = start / BM.MILESTONE_ROWS;
+    for (let x = start + 200; x <= start + 900; x += 200) w.ensure(x);
+    const ch = w.layers.filter(l => l.type === 'reward' && Math.floor(l.row / BM.MILESTONE_ROWS) === 100);
+    const inv = {};
+    ch.forEach(l => l.items.forEach(i => { inv[i.type] = (inv[i.type] || 0) + 1; }));
+    return { list, inv, layers: ch.length, open: ch.length ? ch[ch.length - 1].row - ch[0].row : 0 };
+  });
+  console.log('  --- 10000m ごとの別格 ---');
+  EP.list.forEach(x => console.log(`  ${String(x.depth).padStart(6)}m  ${x.key.padEnd(7)} ${x.span}層  +${x.bonus.toLocaleString('en-US')}`));
+  console.log(`  20000m の中身: ${JSON.stringify(EP.inv)} / 開けた区間 ${EP.layers}層 ${EP.open}行`);
+  const epics = EP.list.filter(x => x.depth % 10000 === 0);
+  check('10000m ごとが「地核の間」', epics.length > 0 && epics.every(x => x.key === 'core'));
+  check('10000m 以外は地核の間にならない', EP.list.filter(x => x.depth % 10000 !== 0).every(x => x.key !== 'core'));
+  check(`別格は開ける区間が長い（${epics[0].span}層 > 大空洞 ${MC.bigSpan}層）`, epics.every(x => x.span > MC.bigSpan));
+  check(`別格のボーナスは通常の上限 ${MC.bonusCap.toLocaleString('en-US')} を超える（+${epics[0].bonus.toLocaleString('en-US')}）`,
+    epics[0].bonus > MC.bonusCap);
+
+  // 上限突破が実際に効くか。ここが飾りだと「別格」の意味が無い
+  const over = await page.evaluate(async () => {
+    const g = BM.game;
+    g.newRun(); BM.ui.hide(); g.noDeath = true;
+    const row = 10000 - 4;
+    g.player.y = row * BM.TILE; g.player.deepest = row;
+    g.player.shield = 0; g.player.power = BM.BOMB_POWER; g.player.bombs = 1;
+    g.camY = g.player.y - BM.VIEW_H * 0.3;
+    g.world.reset();
+    g.world.nextRow = row - 12; g.world.lastRow = row - 12;
+    g.world.mileDone = Math.floor(10000 / BM.MILESTONE_ROWS) - 1;
+    g.world.ensure(row + 120);
+    const before = { shield: g.player.shield, power: g.player.power, score: g.score };
+    for (let i = 0; i < 1200; i++) g.update(1 / 120);
+    const mid = { shield: g.player.shield, power: g.player.power, score: g.score };
+    // 上限突破ぶんを持った状態で 🛡 を拾っても減らないこと
+    g.player.shield = BM.SHIELD_CAP;
+    const l = g.world.layers.find(x => x.items && x.items.length) || g.world.layers[0];
+    g.player.y = BM.centerY(BM.rowOf(g.player.y));
+    l.items.push({ col: BM.colOf(g.player.x), row: BM.rowOf(g.player.y), type: 'SHIELD', t: 0, alive: true });
+    g.checkItems();
+    g.noDeath = false;
+    return { before, mid, afterPickup: g.player.shield,
+             toast: (document.querySelector('#reward-toast .rw-name') || {}).textContent || '',
+             pips: [...document.querySelectorAll('#shield-pips .pip')]
+               .filter(p => p.classList.contains('on') && getComputedStyle(p).visibility !== 'hidden').length };
+  });
+  console.log(`  10000m 通過: シールド ${over.before.shield}→${over.mid.shield} / 爆風 ${over.before.power}→${over.mid.power}` +
+              ` / 点 +${(over.mid.score - over.before.score).toLocaleString('en-US')} / トースト「${over.toast}」`);
+  check(`シールドが通常の上限(${MC.shieldMax})を超える（${over.mid.shield}枚）`, over.mid.shield > MC.shieldMax);
+  check(`爆風が最大(${MC.maxPower})になる`, over.mid.power === MC.maxPower);
+  check(`HUD に上限突破ぶんが出る（${over.pips}個点灯）`, over.pips === over.mid.shield);
+  check('上限突破ぶんを持って🛡を拾っても減らない', over.afterPickup >= MC.shieldCap);
 
   /* ---- 隙間の作り方が一通り出てくるか ---- */
   const seen = await page.evaluate(() => {

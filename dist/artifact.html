@@ -39,9 +39,11 @@ body{
 #app{
   /* 横 640px と、画面の高さから HUD・凡例の分を引いた幅の小さい方。
      0.9375 は canvas の 600/640（幅÷高さ）。これで縦にも必ず収まる。 */
-  /* 下限 504px は HUD が1行に収まる幅（セル 428 ＋ 隙間 40 ＋ 内外の余白 34）。
-     画面がこれより低い時は縦にスクロールさせる。HUD を潰すより見える方が良い。 */
-  width:min(640px, 100%, max(504px, calc((100dvh - 150px) * 0.9375)));
+  /* 下限 520px は HUD が1行に収まる幅（セル 438 ＋ 隙間 40 ＋ 内外の余白 34、
+     シールドは上限突破の5枚ぶんを確保した幅）。
+     ここを削って HUD を2行に折り返させても、増える高さは同じくらいなので
+     得が無い。画面が低い時は縦にスクロールさせる。 */
+  width:min(640px, 100%, max(520px, calc((100dvh - 150px) * 0.9375)));
   min-width:0;
   margin:auto;
   display:flex;
@@ -75,6 +77,9 @@ body{
   text-shadow:0 0 12px rgba(255,210,61,.35);
 }
 .hud-small{font-size:14px;white-space:nowrap}
+/* 桁が増えた時の縮小。枠を広げる代わりに字を小さくする */
+.hud-value.long{font-size:15px}
+.hud-value.longer{font-size:13px}
 .hud-value.warn{color:var(--hot);animation:pulse .6s infinite}
 .hud-value.bump{animation:bump .25s ease-out}
 @keyframes pulse{50%{opacity:.35}}
@@ -111,8 +116,9 @@ body{
 }
 .tbtn.big{position:relative}
 
-/* シールド。持っているかどうかが常に見えていないと存在を忘れる */
-.hud-shield{min-width:56px}
+/* シールド。持っているかどうかが常に見えていないと存在を忘れる。
+   幅は上限突破の5枚ぶん（11px×5 ＋ 隙間2px×4）を最初から確保しておく */
+.hud-shield{min-width:66px}
 .hud-shield .pips{padding-top:4px}
 .pip.sh{width:11px;height:11px;border-radius:3px;transform:rotate(45deg)}
 .pip.sh.on{
@@ -121,6 +127,15 @@ body{
   box-shadow:0 0 9px rgba(140,232,255,.9);
 }
 .hud-shield.none{opacity:.4}
+/* 上限突破ぶん。場所は常に取っておき、持っている時だけ見せる。
+   持った瞬間に幅が変わると、隣の数値まで動いて読めなくなる。 */
+.pip.sh.extra{visibility:hidden}
+.hud-shield.over .pip.sh.extra{visibility:visible}
+.hud-shield.over .pip.sh.extra.on{
+  background:radial-gradient(circle at 35% 30%,#fff0fb,#ff7ac8 55%,#a8318a);
+  border-color:#ffc4ec;
+  box-shadow:0 0 11px rgba(255,122,200,.95);
+}
 .hud-shield.fire .pips{animation:shFire .5s ease-out}
 @keyframes shFire{
   0%{transform:scale(1.6);filter:brightness(2.2)}
@@ -455,6 +470,8 @@ BM.CHAIN_DELAY   = 0.055;
 
 /* ---------- シールド ---------- */
 BM.SHIELD_MAX    = 3;
+// 通常はここまで。10000m ごとの「地核の間」だけがこの上限を超えさせる
+BM.SHIELD_CAP    = 5;
 BM.SHIELD_POWER  = 3;    // 発動時に開ける穴（通常の爆弾より大きい）
 BM.SHIELD_IFRAME = 0.7;  // 発動直後の無敵。厚い層で複数枚消費するのを防ぐ
 
@@ -495,8 +512,12 @@ BM.MILESTONE_ROWS = 200;   // 何m ごとにご褒美を置くか
 BM.REWARD_SPAN    = 3;     // 開けたままにする層の数（この間は岩が無い）
 BM.BIG_EVERY      = 5;     // 何回ごとに大空洞にするか（5 → 1000m ごと）
 BM.BIG_SPAN       = 5;
+BM.EPIC_EVERY     = 50;    // 何回ごとに別格にするか（50 → 10000m ごと）
+BM.EPIC_SPAN      = 10;
 BM.MILESTONE_BONUS = 500;  // 到達ボーナス。節目ごとに増える
 BM.MILESTONE_BONUS_CAP = 20;  // 増え続けると点が壊れるので、この節目で止める
+// 別格だけは上限を高く取る。ここが「深く潜り続けた見返り」になる
+BM.EPIC_BONUS_CAP = 200;
 BM.COIN_SCORE     = 120;   // 結晶1個の点
 
 /* 中身のレパートリー。巡回するので、どこまで潜っても次のご褒美が来る */
@@ -513,6 +534,12 @@ BM.REWARDS = [
 BM.REWARD_BIG = { key: 'cavern', name: '大空洞', color: '#8affd0',
   desc: '全部持っていけ', bombsFull: true, shield: 1,
   items: ['SHIELD', 'POWER', 'BOMB'], coins: 18 };
+
+/* 10000m ごとの別格。ここだけは通常の上限を超える。
+   4種＋大空洞の巡回だけだと、2000m と 20000m で質的な違いが無くなる。 */
+BM.REWARD_EPIC = { key: 'core', name: '地核の間', color: '#ff7ac8',
+  desc: '限界を一枚超える', bombsFull: true, shieldFull: true, powerFull: true,
+  items: ['SHIELD', 'POWER', 'BOMB', 'BOMB'], coins: 40 };
 
 /* ---------- 保存 ---------- */
 BM.store = {
@@ -1419,11 +1446,27 @@ BM.DIRS = [
   /* 節目の中身。深さ（=節目の番号）だけで決まるようにしておく。
      乱数で選ぶと、同じ深度を検査しても毎回違う結果になって確かめられない。 */
   World.prototype.rewardAt = function (mile) {
+    if (mile % BM.EPIC_EVERY === 0) return BM.REWARD_EPIC;
     if (mile % BM.BIG_EVERY === 0) return BM.REWARD_BIG;
     // 大空洞が挟まると番号がずれて、特定の種類だけ出にくくなる。
     // 大空洞のぶんを引いてから巡回させると4種が均等に回る。
+    // 別格は大空洞の位置（BIG_EVERY の倍数）に重なるので、追加の補正は要らない。
     var i = mile - Math.floor(mile / BM.BIG_EVERY);
     return BM.REWARDS[(i - 1) % BM.REWARDS.length];
+  };
+
+  /* その節目で開けたままにする層の数 */
+  World.prototype.rewardSpan = function (mile) {
+    if (mile % BM.EPIC_EVERY === 0) return BM.EPIC_SPAN;
+    if (mile % BM.BIG_EVERY === 0) return BM.BIG_SPAN;
+    return BM.REWARD_SPAN;
+  };
+
+  /* 到達ボーナス。普通の節目は早めに上限で止めて点が壊れるのを防ぐが、
+     別格だけは伸ばす。ここが深く潜り続けたことへの見返りになる。 */
+  World.prototype.rewardBonus = function (mile) {
+    var cap = (mile % BM.EPIC_EVERY === 0) ? BM.EPIC_BONUS_CAP : BM.MILESTONE_BONUS_CAP;
+    return BM.MILESTONE_BONUS * Math.min(mile, cap);
   };
 
   /* ご褒美の間に浮かべるものを、空間全体に配置してから配る。
@@ -1485,8 +1528,7 @@ BM.DIRS = [
         kind: this.rewardKind,
         mile: this.mileDone,
         depth: this.mileDone * BM.MILESTONE_ROWS,
-        // 節目ごとに増えるが、増え続けると点が壊れるので上限を置く
-        bonus: BM.MILESTONE_BONUS * Math.min(this.mileDone, BM.MILESTONE_BONUS_CAP)
+        bonus: this.rewardBonus(this.mileDone)
       };
     }
     // 自分の担当区間にあるものだけ持つ。全部を先頭の層に持たせると、
@@ -1559,7 +1601,7 @@ BM.DIRS = [
       if (this.rewardLeft <= 0 && mile > this.mileDone && !this.debugType) {
         this.mileDone = mile;
         this.rewardKind = this.rewardAt(mile);
-        this.rewardLeft = (mile % BM.BIG_EVERY === 0) ? BM.BIG_SPAN : BM.REWARD_SPAN;
+        this.rewardLeft = this.rewardSpan(mile);
         this.rewardHead = true;
         this.rewardPlan = this.planReward(this.rewardKind, rows, this.rewardLeft * cfg.spacing, cfg);
       }
@@ -2550,7 +2592,9 @@ BM.DIRS = [
         switch (it.type) {
           case 'BOMB':   p.bombs = Math.min(BM.MAX_BOMBS, p.bombs + 1); break;
           case 'POWER':  p.power = Math.min(BM.MAX_POWER, p.power + 1); break;
-          case 'SHIELD': p.shield = Math.min(BM.SHIELD_MAX, p.shield + 1); break;
+          // 上限突破ぶんを持っている時に min() で丸めると、拾ったのに減る。
+          // 拾いで増えるのは通常の上限までだが、それを下回らせてはいけない。
+          case 'SHIELD': if (p.shield < BM.SHIELD_MAX) p.shield += 1; break;
           case 'SLOW':   p.slow = 3.5; break;
           // 結晶は取るほど連なって点が伸びる。落ちながらの寄り道の見返り
           case 'COIN':
@@ -2580,7 +2624,16 @@ BM.DIRS = [
     var p = this.player, k = r.kind, got = [];
     if (k.bombsFull && p.bombs < BM.MAX_BOMBS) { p.bombs = BM.MAX_BOMBS; got.push('爆弾 満タン'); }
     if (k.bombs) { p.bombs = Math.min(BM.MAX_BOMBS, p.bombs + k.bombs); got.push('爆弾 +' + k.bombs); }
-    if (k.shield) { p.shield = Math.min(BM.SHIELD_MAX, p.shield + k.shield); got.push('シールド +' + k.shield); }
+    if (k.shield && p.shield < BM.SHIELD_MAX) {
+      p.shield = Math.min(BM.SHIELD_MAX, p.shield + k.shield);
+      got.push('シールド +' + k.shield);
+    }
+    // 別格だけは通常の上限を超えて持てる。アイテム拾いでは絶対に到達できない枚数
+    if (k.shieldFull && p.shield < BM.SHIELD_CAP) {
+      p.shield = BM.SHIELD_CAP;
+      got.push('シールド ' + BM.SHIELD_CAP + '枚（上限突破）');
+    }
+    if (k.powerFull && p.power < BM.MAX_POWER) { p.power = BM.MAX_POWER; got.push('爆風 最大'); }
     if (k.slow) { p.slow = k.slow; got.push('スロー ' + k.slow + '秒'); }
     this.score += r.bonus;
     this.reward = { kind: k, t: 0, depth: r.depth, bonus: r.bonus };
@@ -3046,14 +3099,26 @@ BM.DIRS = [
       sg.addColorStop(1, 'rgba(140,232,255,' + (0.14 + boost * 0.5).toFixed(2) + ')');
       g.fillStyle = sg;
       g.beginPath(); g.arc(0, 0, rad, 0, 6.3); g.fill();
-      // 枚数ぶんの回るリング
-      var n = Math.max(1, p.shield);
+      // 枚数ぶんの回るリング。ただし通常の上限まで。
+      // 枚数ぶん増やし続けると、内側のリングが主人公に重なって本体が見えなくなる。
+      var n = Math.max(1, Math.min(BM.SHIELD_MAX, p.shield));
       for (var si = 0; si < n; si++) {
         g.strokeStyle = 'rgba(140,232,255,' + (0.45 + boost * 0.5).toFixed(2) + ')';
         g.lineWidth = 2.2;
         g.beginPath();
         g.arc(0, 0, rad - si * 3.5, p.spin * (si % 2 ? -1.6 : 1.6) + si, p.spin * (si % 2 ? -1.6 : 1.6) + si + 4.4);
         g.stroke();
+      }
+      // 上限を超えて持っているぶんは、内側に足すのではなく外側の桃色の環で示す
+      if (p.shield > BM.SHIELD_MAX) {
+        var ex = p.shield - BM.SHIELD_MAX;
+        for (var xi = 0; xi < ex; xi++) {
+          g.strokeStyle = 'rgba(255,122,200,' + (0.6 + boost * 0.4).toFixed(2) + ')';
+          g.lineWidth = 2.4;
+          g.beginPath();
+          g.arc(0, 0, rad + 4 + xi * 4, -p.spin * 2.1 + xi * 2.2, -p.spin * 2.1 + xi * 2.2 + 3.6);
+          g.stroke();
+        }
       }
       g.restore();
     }
@@ -3430,9 +3495,11 @@ BM.DIRS = [
       }
       el.shield = document.getElementById('hud-shield');
       el.shieldPips = document.getElementById('shield-pips');
-      for (var s = 0; s < BM.SHIELD_MAX; s++) {
+      // 上限突破ぶんまで枠を作っておく。持った時に作ると HUD の幅が動いて
+      // 他の数値がずれるので、場所は最初から確保しておく（初期は非表示）。
+      for (var s = 0; s < BM.SHIELD_CAP; s++) {
         var sp = document.createElement('span');
-        sp.className = 'pip sh';
+        sp.className = 'pip sh' + (s >= BM.SHIELD_MAX ? ' extra' : '');
         el.shieldPips.appendChild(sp);
       }
       el.banner = document.getElementById('combo-banner');
@@ -3477,7 +3544,12 @@ BM.DIRS = [
         this._d = p.deepest;
       }
       if (g.score !== this._s) {
-        el.score.textContent = g.score.toLocaleString('en-US');
+        var txt = g.score.toLocaleString('en-US');
+        el.score.textContent = txt;
+        // 桁が増えたら字を小さくする。枠を広げると HUD が1行に収まらなくなり、
+        // 隣の BEST に食い込む。深部のご褒美で8桁まで伸びるので、ここは必要。
+        el.score.classList.toggle('long', txt.length > 9);
+        el.score.classList.toggle('longer', txt.length > 11);
         if (g.score > this._s && this._s >= 0) this.bump(el.score);
         this._s = g.score;
       }
@@ -3494,6 +3566,8 @@ BM.DIRS = [
         var sps = el.shieldPips.children;
         for (var j = 0; j < sps.length; j++) sps[j].classList.toggle('on', j < p.shield);
         el.shield.classList.toggle('none', p.shield === 0);
+        // 上限を超えて持っている時だけ、はみ出したぶんを見せる
+        el.shield.classList.toggle('over', p.shield > BM.SHIELD_MAX);
         if (p.shield < this._sh) {
           el.shield.classList.remove('fire'); void el.shield.offsetWidth; el.shield.classList.add('fire');
         }
@@ -3537,7 +3611,8 @@ BM.DIRS = [
         '<p>100m ごとに地層が変わり、落下速度も層の間隔も上がっていく。</p>' +
         '<p><b style="color:#ffe066">200m ごとに「ご褒美の間」がある。</b>' +
         'その区間だけ岩が無く、爆弾の補給・シールド・爆風アップ・結晶（💠 点数）が' +
-        '待っている。中身は4種を巡回し、<b>1000m ごとは全部盛りの大空洞</b>。<br>' +
+        '待っている。中身は4種を巡回し、<b>1000m ごとは全部盛りの大空洞</b>、' +
+        '<b style="color:#ff7ac8">10000m ごとは「地核の間」でシールドの上限を超える</b>。<br>' +
         '画面右上に次の節目と残り距離が出ている。<b>深さに終わりは無い</b>ので、' +
         '目標は常に次の節目。</p>' +
         '</div>' +

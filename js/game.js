@@ -368,7 +368,9 @@
         switch (it.type) {
           case 'BOMB':   p.bombs = Math.min(BM.MAX_BOMBS, p.bombs + 1); break;
           case 'POWER':  p.power = Math.min(BM.MAX_POWER, p.power + 1); break;
-          case 'SHIELD': p.shield = Math.min(BM.SHIELD_MAX, p.shield + 1); break;
+          // 上限突破ぶんを持っている時に min() で丸めると、拾ったのに減る。
+          // 拾いで増えるのは通常の上限までだが、それを下回らせてはいけない。
+          case 'SHIELD': if (p.shield < BM.SHIELD_MAX) p.shield += 1; break;
           case 'SLOW':   p.slow = 3.5; break;
           // 結晶は取るほど連なって点が伸びる。落ちながらの寄り道の見返り
           case 'COIN':
@@ -398,7 +400,16 @@
     var p = this.player, k = r.kind, got = [];
     if (k.bombsFull && p.bombs < BM.MAX_BOMBS) { p.bombs = BM.MAX_BOMBS; got.push('爆弾 満タン'); }
     if (k.bombs) { p.bombs = Math.min(BM.MAX_BOMBS, p.bombs + k.bombs); got.push('爆弾 +' + k.bombs); }
-    if (k.shield) { p.shield = Math.min(BM.SHIELD_MAX, p.shield + k.shield); got.push('シールド +' + k.shield); }
+    if (k.shield && p.shield < BM.SHIELD_MAX) {
+      p.shield = Math.min(BM.SHIELD_MAX, p.shield + k.shield);
+      got.push('シールド +' + k.shield);
+    }
+    // 別格だけは通常の上限を超えて持てる。アイテム拾いでは絶対に到達できない枚数
+    if (k.shieldFull && p.shield < BM.SHIELD_CAP) {
+      p.shield = BM.SHIELD_CAP;
+      got.push('シールド ' + BM.SHIELD_CAP + '枚（上限突破）');
+    }
+    if (k.powerFull && p.power < BM.MAX_POWER) { p.power = BM.MAX_POWER; got.push('爆風 最大'); }
     if (k.slow) { p.slow = k.slow; got.push('スロー ' + k.slow + '秒'); }
     this.score += r.bonus;
     this.reward = { kind: k, t: 0, depth: r.depth, bonus: r.bonus };
@@ -864,14 +875,26 @@
       sg.addColorStop(1, 'rgba(140,232,255,' + (0.14 + boost * 0.5).toFixed(2) + ')');
       g.fillStyle = sg;
       g.beginPath(); g.arc(0, 0, rad, 0, 6.3); g.fill();
-      // 枚数ぶんの回るリング
-      var n = Math.max(1, p.shield);
+      // 枚数ぶんの回るリング。ただし通常の上限まで。
+      // 枚数ぶん増やし続けると、内側のリングが主人公に重なって本体が見えなくなる。
+      var n = Math.max(1, Math.min(BM.SHIELD_MAX, p.shield));
       for (var si = 0; si < n; si++) {
         g.strokeStyle = 'rgba(140,232,255,' + (0.45 + boost * 0.5).toFixed(2) + ')';
         g.lineWidth = 2.2;
         g.beginPath();
         g.arc(0, 0, rad - si * 3.5, p.spin * (si % 2 ? -1.6 : 1.6) + si, p.spin * (si % 2 ? -1.6 : 1.6) + si + 4.4);
         g.stroke();
+      }
+      // 上限を超えて持っているぶんは、内側に足すのではなく外側の桃色の環で示す
+      if (p.shield > BM.SHIELD_MAX) {
+        var ex = p.shield - BM.SHIELD_MAX;
+        for (var xi = 0; xi < ex; xi++) {
+          g.strokeStyle = 'rgba(255,122,200,' + (0.6 + boost * 0.4).toFixed(2) + ')';
+          g.lineWidth = 2.4;
+          g.beginPath();
+          g.arc(0, 0, rad + 4 + xi * 4, -p.spin * 2.1 + xi * 2.2, -p.spin * 2.1 + xi * 2.2 + 3.6);
+          g.stroke();
+        }
       }
       g.restore();
     }

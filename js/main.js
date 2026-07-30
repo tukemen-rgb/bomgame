@@ -67,9 +67,11 @@
       }
       el.shield = document.getElementById('hud-shield');
       el.shieldPips = document.getElementById('shield-pips');
-      for (var s = 0; s < BM.SHIELD_MAX; s++) {
+      // 上限突破ぶんまで枠を作っておく。持った時に作ると HUD の幅が動いて
+      // 他の数値がずれるので、場所は最初から確保しておく（初期は非表示）。
+      for (var s = 0; s < BM.SHIELD_CAP; s++) {
         var sp = document.createElement('span');
-        sp.className = 'pip sh';
+        sp.className = 'pip sh' + (s >= BM.SHIELD_MAX ? ' extra' : '');
         el.shieldPips.appendChild(sp);
       }
       el.banner = document.getElementById('combo-banner');
@@ -114,7 +116,12 @@
         this._d = p.deepest;
       }
       if (g.score !== this._s) {
-        el.score.textContent = g.score.toLocaleString('en-US');
+        var txt = g.score.toLocaleString('en-US');
+        el.score.textContent = txt;
+        // 桁が増えたら字を小さくする。枠を広げると HUD が1行に収まらなくなり、
+        // 隣の BEST に食い込む。深部のご褒美で8桁まで伸びるので、ここは必要。
+        el.score.classList.toggle('long', txt.length > 9);
+        el.score.classList.toggle('longer', txt.length > 11);
         if (g.score > this._s && this._s >= 0) this.bump(el.score);
         this._s = g.score;
       }
@@ -131,6 +138,8 @@
         var sps = el.shieldPips.children;
         for (var j = 0; j < sps.length; j++) sps[j].classList.toggle('on', j < p.shield);
         el.shield.classList.toggle('none', p.shield === 0);
+        // 上限を超えて持っている時だけ、はみ出したぶんを見せる
+        el.shield.classList.toggle('over', p.shield > BM.SHIELD_MAX);
         if (p.shield < this._sh) {
           el.shield.classList.remove('fire'); void el.shield.offsetWidth; el.shield.classList.add('fire');
         }
@@ -174,7 +183,8 @@
         '<p>100m ごとに地層が変わり、落下速度も層の間隔も上がっていく。</p>' +
         '<p><b style="color:#ffe066">200m ごとに「ご褒美の間」がある。</b>' +
         'その区間だけ岩が無く、爆弾の補給・シールド・爆風アップ・結晶（💠 点数）が' +
-        '待っている。中身は4種を巡回し、<b>1000m ごとは全部盛りの大空洞</b>。<br>' +
+        '待っている。中身は4種を巡回し、<b>1000m ごとは全部盛りの大空洞</b>、' +
+        '<b style="color:#ff7ac8">10000m ごとは「地核の間」でシールドの上限を超える</b>。<br>' +
         '画面右上に次の節目と残り距離が出ている。<b>深さに終わりは無い</b>ので、' +
         '目標は常に次の節目。</p>' +
         '</div>' +

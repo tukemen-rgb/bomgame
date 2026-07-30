@@ -55,6 +55,8 @@ BM.CHAIN_DELAY   = 0.055;
 
 /* ---------- シールド ---------- */
 BM.SHIELD_MAX    = 3;
+// 通常はここまで。10000m ごとの「地核の間」だけがこの上限を超えさせる
+BM.SHIELD_CAP    = 5;
 BM.SHIELD_POWER  = 3;    // 発動時に開ける穴（通常の爆弾より大きい）
 BM.SHIELD_IFRAME = 0.7;  // 発動直後の無敵。厚い層で複数枚消費するのを防ぐ
 
@@ -95,8 +97,12 @@ BM.MILESTONE_ROWS = 200;   // 何m ごとにご褒美を置くか
 BM.REWARD_SPAN    = 3;     // 開けたままにする層の数（この間は岩が無い）
 BM.BIG_EVERY      = 5;     // 何回ごとに大空洞にするか（5 → 1000m ごと）
 BM.BIG_SPAN       = 5;
+BM.EPIC_EVERY     = 50;    // 何回ごとに別格にするか（50 → 10000m ごと）
+BM.EPIC_SPAN      = 10;
 BM.MILESTONE_BONUS = 500;  // 到達ボーナス。節目ごとに増える
 BM.MILESTONE_BONUS_CAP = 20;  // 増え続けると点が壊れるので、この節目で止める
+// 別格だけは上限を高く取る。ここが「深く潜り続けた見返り」になる
+BM.EPIC_BONUS_CAP = 200;
 BM.COIN_SCORE     = 120;   // 結晶1個の点
 
 /* 中身のレパートリー。巡回するので、どこまで潜っても次のご褒美が来る */
@@ -113,6 +119,12 @@ BM.REWARDS = [
 BM.REWARD_BIG = { key: 'cavern', name: '大空洞', color: '#8affd0',
   desc: '全部持っていけ', bombsFull: true, shield: 1,
   items: ['SHIELD', 'POWER', 'BOMB'], coins: 18 };
+
+/* 10000m ごとの別格。ここだけは通常の上限を超える。
+   4種＋大空洞の巡回だけだと、2000m と 20000m で質的な違いが無くなる。 */
+BM.REWARD_EPIC = { key: 'core', name: '地核の間', color: '#ff7ac8',
+  desc: '限界を一枚超える', bombsFull: true, shieldFull: true, powerFull: true,
+  items: ['SHIELD', 'POWER', 'BOMB', 'BOMB'], coins: 40 };
 
 /* ---------- 保存 ---------- */
 BM.store = {

@@ -255,11 +255,27 @@
   /* 節目の中身。深さ（=節目の番号）だけで決まるようにしておく。
      乱数で選ぶと、同じ深度を検査しても毎回違う結果になって確かめられない。 */
   World.prototype.rewardAt = function (mile) {
+    if (mile % BM.EPIC_EVERY === 0) return BM.REWARD_EPIC;
     if (mile % BM.BIG_EVERY === 0) return BM.REWARD_BIG;
     // 大空洞が挟まると番号がずれて、特定の種類だけ出にくくなる。
     // 大空洞のぶんを引いてから巡回させると4種が均等に回る。
+    // 別格は大空洞の位置（BIG_EVERY の倍数）に重なるので、追加の補正は要らない。
     var i = mile - Math.floor(mile / BM.BIG_EVERY);
     return BM.REWARDS[(i - 1) % BM.REWARDS.length];
+  };
+
+  /* その節目で開けたままにする層の数 */
+  World.prototype.rewardSpan = function (mile) {
+    if (mile % BM.EPIC_EVERY === 0) return BM.EPIC_SPAN;
+    if (mile % BM.BIG_EVERY === 0) return BM.BIG_SPAN;
+    return BM.REWARD_SPAN;
+  };
+
+  /* 到達ボーナス。普通の節目は早めに上限で止めて点が壊れるのを防ぐが、
+     別格だけは伸ばす。ここが深く潜り続けたことへの見返りになる。 */
+  World.prototype.rewardBonus = function (mile) {
+    var cap = (mile % BM.EPIC_EVERY === 0) ? BM.EPIC_BONUS_CAP : BM.MILESTONE_BONUS_CAP;
+    return BM.MILESTONE_BONUS * Math.min(mile, cap);
   };
 
   /* ご褒美の間に浮かべるものを、空間全体に配置してから配る。
@@ -321,8 +337,7 @@
         kind: this.rewardKind,
         mile: this.mileDone,
         depth: this.mileDone * BM.MILESTONE_ROWS,
-        // 節目ごとに増えるが、増え続けると点が壊れるので上限を置く
-        bonus: BM.MILESTONE_BONUS * Math.min(this.mileDone, BM.MILESTONE_BONUS_CAP)
+        bonus: this.rewardBonus(this.mileDone)
       };
     }
     // 自分の担当区間にあるものだけ持つ。全部を先頭の層に持たせると、
@@ -395,7 +410,7 @@
       if (this.rewardLeft <= 0 && mile > this.mileDone && !this.debugType) {
         this.mileDone = mile;
         this.rewardKind = this.rewardAt(mile);
-        this.rewardLeft = (mile % BM.BIG_EVERY === 0) ? BM.BIG_SPAN : BM.REWARD_SPAN;
+        this.rewardLeft = this.rewardSpan(mile);
         this.rewardHead = true;
         this.rewardPlan = this.planReward(this.rewardKind, rows, this.rewardLeft * cfg.spacing, cfg);
       }

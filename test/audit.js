@@ -55,7 +55,7 @@ function auditWorld(maxRow) {
   const fail = { reach: [], blocked: [], tooFast: [], narrow: [], offscreen: [], button: [], mile: [] };
   let layers = 0, byType = {};
   // ご褒美の間（200m ごと）。1つでも欠けると、そこから先は潜る理由が無くなる
-  const mileSeen = {}, mileKind = {};
+  const mileSeen = {}, mileKind = {}, mileOf = {};
   let rewardOpen = 0, rewardLayers = 0, coinPairs = 0, coinTooFar = 0;
   let giftN = 0, giftUnreachable = 0;
   let entry = null;   // ご褒美の間に入る直前の出口。確定アイテムはここから届かないと意味がない
@@ -182,6 +182,7 @@ function auditWorld(maxRow) {
         if (l.reward) {
           mileSeen[l.reward.mile] = l.reward.depth;
           mileKind[l.kind.key] = (mileKind[l.kind.key] || 0) + 1;
+          mileOf[l.reward.mile] = l.kind.key;
           entry = { lo: prevExit.lo, hi: prevExit.hi, row: prevExit.row };
         }
         // 確定で渡すつもりのアイテムが、入口から横移動で届く位置にあるか。
@@ -208,8 +209,15 @@ function auditWorld(maxRow) {
   const mn = Object.keys(mileSeen).map(Number).sort((a, b) => a - b);
   const missing = [];
   for (let m = mn[0]; m < mn[mn.length - 1]; m++) if (!mileSeen[m]) missing.push(m * BM.MILESTONE_ROWS);
+  // 10000m ごとの別格。ここが欠けると、深く潜り続ける見返りが無くなる
+  const epicMiles = mn.filter(m => m % BM.EPIC_EVERY === 0);
+  const epicWrong = epicMiles.filter(m => mileOf[m] !== 'core').map(m => m * BM.MILESTONE_ROWS);
+  const coreStray = mn.filter(m => m % BM.EPIC_EVERY !== 0 && mileOf[m] === 'core')
+                      .map(m => m * BM.MILESTONE_ROWS);
   return { layers, byType, fail, milestones: mn.length, missing,
-           mileKind, rewardOpen, rewardLayers, coinPairs, coinTooFar, giftN, giftUnreachable };
+           mileKind, rewardOpen, rewardLayers, coinPairs, coinTooFar, giftN, giftUnreachable,
+           epicN: epicMiles.length, epicWrong, coreStray,
+           epicDepths: epicMiles.slice(0, 4).map(m => m * BM.MILESTONE_ROWS) };
 }
 
 (async () => {
@@ -286,6 +294,11 @@ function auditWorld(maxRow) {
   check(`結晶は落ちながら追える間隔（届かない ${res.coinTooFar} 組）`, res.coinTooFar === 0);
   check(`確定アイテムは入口から届く（${res.giftN.toLocaleString('en-US')} 個中 ${res.giftUnreachable} 個が届かない）`,
     res.giftUnreachable === 0, res.fail.mile.length ? JSON.stringify(res.fail.mile[0]) : '');
+  check(`10000m ごとが別格「地核の間」（${res.epicN} 個: ${res.epicDepths.join('m, ')}m …）`,
+    res.epicN > 0 && res.epicWrong.length === 0,
+    res.epicWrong.length ? '欠け ' + res.epicWrong.slice(0, 3).join('m, ') + 'm' : '');
+  check('別格は10000m の節目にしか出ない', res.coreStray.length === 0,
+    res.coreStray.length ? res.coreStray.slice(0, 3).join('m, ') + 'm' : '');
 
   /* ===== 3. 実プレイ検査：無敵で長時間潜る ===== */
   const PLAY_SEC = 120;

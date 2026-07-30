@@ -37,9 +37,11 @@ body{
 #app{
   /* 横 640px と、画面の高さから HUD・凡例の分を引いた幅の小さい方。
      0.9375 は canvas の 600/640（幅÷高さ）。これで縦にも必ず収まる。 */
-  /* 下限 504px は HUD が1行に収まる幅（セル 428 ＋ 隙間 40 ＋ 内外の余白 34）。
-     画面がこれより低い時は縦にスクロールさせる。HUD を潰すより見える方が良い。 */
-  width:min(640px, 100%, max(504px, calc((100dvh - 150px) * 0.9375)));
+  /* 下限 520px は HUD が1行に収まる幅（セル 438 ＋ 隙間 40 ＋ 内外の余白 34、
+     シールドは上限突破の5枚ぶんを確保した幅）。
+     ここを削って HUD を2行に折り返させても、増える高さは同じくらいなので
+     得が無い。画面が低い時は縦にスクロールさせる。 */
+  width:min(640px, 100%, max(520px, calc((100dvh - 150px) * 0.9375)));
   min-width:0;
   margin:auto;
   display:flex;
@@ -73,6 +75,9 @@ body{
   text-shadow:0 0 12px rgba(255,210,61,.35);
 }
 .hud-small{font-size:14px;white-space:nowrap}
+/* 桁が増えた時の縮小。枠を広げる代わりに字を小さくする */
+.hud-value.long{font-size:15px}
+.hud-value.longer{font-size:13px}
 .hud-value.warn{color:var(--hot);animation:pulse .6s infinite}
 .hud-value.bump{animation:bump .25s ease-out}
 @keyframes pulse{50%{opacity:.35}}
@@ -109,8 +114,9 @@ body{
 }
 .tbtn.big{position:relative}
 
-/* シールド。持っているかどうかが常に見えていないと存在を忘れる */
-.hud-shield{min-width:56px}
+/* シールド。持っているかどうかが常に見えていないと存在を忘れる。
+   幅は上限突破の5枚ぶん（11px×5 ＋ 隙間2px×4）を最初から確保しておく */
+.hud-shield{min-width:66px}
 .hud-shield .pips{padding-top:4px}
 .pip.sh{width:11px;height:11px;border-radius:3px;transform:rotate(45deg)}
 .pip.sh.on{
@@ -119,6 +125,15 @@ body{
   box-shadow:0 0 9px rgba(140,232,255,.9);
 }
 .hud-shield.none{opacity:.4}
+/* 上限突破ぶん。場所は常に取っておき、持っている時だけ見せる。
+   持った瞬間に幅が変わると、隣の数値まで動いて読めなくなる。 */
+.pip.sh.extra{visibility:hidden}
+.hud-shield.over .pip.sh.extra{visibility:visible}
+.hud-shield.over .pip.sh.extra.on{
+  background:radial-gradient(circle at 35% 30%,#fff0fb,#ff7ac8 55%,#a8318a);
+  border-color:#ffc4ec;
+  box-shadow:0 0 11px rgba(255,122,200,.95);
+}
 .hud-shield.fire .pips{animation:shFire .5s ease-out}
 @keyframes shFire{
   0%{transform:scale(1.6);filter:brightness(2.2)}
