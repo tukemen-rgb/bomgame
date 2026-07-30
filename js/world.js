@@ -360,6 +360,18 @@
 
       BUILDERS[type](layer, cfg, { lo: this.exit.lo, hi: this.exit.hi });
 
+      // 動く層の作り直しの後で、開けた穴を必ず塗り直す
+      if (layer.dynamic && layer.refresh) {
+        layer.refresh = (function (fn) {
+          return function (t) {
+            fn.call(this, t);
+            if (this.punched) {
+              for (var k = 0; k < this.punched.length; k++) this.cells[this.punched[k]] = BM.T_EMPTY;
+            }
+          };
+        })(layer.refresh);
+      }
+
       // ときどきアイテムを浮かべる
       if (Math.random() < 0.3) {
         var pool = ['BOMB', 'BOMB', 'POWER', 'SHIELD', 'SLOW'];
@@ -414,6 +426,12 @@
     var l = this.byRow[row];
     if (!l || l.row !== row || !l.cells) return;
     l.cells[col] = v;
+    // 動く層は毎フレーム cells を作り直すので、そのままだと開けた穴が
+    // 次のフレームで塞がる。爆風で開けた穴は動いても残るのが正しい。
+    if (l.dynamic && v === BM.T_EMPTY) {
+      if (!l.punched) l.punched = [];
+      if (l.punched.indexOf(col) < 0) l.punched.push(col);
+    }
   };
 
   /* 画面より十分上に流れた地層を捨てる */

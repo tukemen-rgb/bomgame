@@ -183,27 +183,31 @@ function installPilot() {
   const insp = await page.evaluate(() => ({
     depth: BM.game.player.deepest,
     passed: window.__passed,
-    log: BM.game.deathLog.map(d => ({ depth: d.depth, type: d.type, cells: d.cells }))
+    log: BM.game.deathLog.map(d => ({ depth: d.depth, row: d.row, type: d.type, cells: d.cells }))
   }));
   await shot('06-inspect.png');
   await page.evaluate(() => { BM.game.noDeath = false; });
 
-  const per100 = insp.log.length / Math.max(1, insp.passed) * 100;
-  console.log(`  到達 ${insp.depth}m / ${insp.passed} 層を通過 / 詰まり ${insp.log.length} 件` +
-              ` (100層あたり ${per100.toFixed(1)} 件)`);
-  if (insp.log.length) {
+  /* 数えるのは「抜けられなかった層の数」。同じ層の中で岩に何回触ったかを
+     数えると、1枚の壁が何十件にも化けて実態が分からなくなる。 */
+  const jamRows = [...new Set(insp.log.map(d => d.row))];
+  const firstOf = r => insp.log.find(d => d.row === r);
+  const per100 = jamRows.length / Math.max(1, insp.passed) * 100;
+  console.log(`  到達 ${insp.depth}m / ${insp.passed} 層を通過 / 抜けられなかった層 ${jamRows.length}` +
+              ` (接触 ${insp.log.length} 回, 100層あたり ${per100.toFixed(1)} 層)`);
+  if (jamRows.length) {
     const byType = {}, byBand = {};
-    insp.log.forEach(d => {
+    jamRows.map(firstOf).forEach(d => {
       byType[d.type] = (byType[d.type] || 0) + 1;
       const band = Math.floor(d.depth / 100) * 100;
       byBand[band] = (byBand[band] || 0) + 1;
     });
     console.log('    地層別:', JSON.stringify(byType));
     console.log('    深度帯別:', JSON.stringify(byBand));
-    console.log('    最初の3件:', JSON.stringify(insp.log.slice(0, 3)));
+    console.log('    最初の3層:', JSON.stringify(jamRows.slice(0, 3).map(firstOf)));
   }
   check(`最深部まで通しても構造が破綻しない（${insp.depth}m まで確認）`, insp.depth >= 400);
-  check('詰まりが100層あたり2件未満', per100 < 2);
+  check('抜けられない層が100層あたり2層未満', per100 < 2);
 
   /* ---- 地層の種類ごとに、本当に最後まで通れるか ----
      1種類だけを並べた縦坑を作り、自動操縦で潜らせる。

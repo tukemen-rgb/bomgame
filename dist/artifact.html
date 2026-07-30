@@ -14,7 +14,10 @@
 }
 
 *{box-sizing:border-box}
-html,body{height:100%}
+html{height:100%}
+/* body は min-height。中身が画面より高くなったら body ごと伸びるので、
+   はみ出した上端も残らずスクロールで届く。 */
+body{min-height:100%}
 body{
   margin:0;
   background:
@@ -24,14 +27,23 @@ body{
   color:var(--ink);
   font-family:"Segoe UI","Hiragino Kaku Gothic ProN","Noto Sans JP",system-ui,sans-serif;
   display:flex;
-  align-items:center;
+  /* center ではなく flex-start ＋ margin:auto。
+     中身が画面より縦に長くなった時、center だと上にはみ出した分が
+     スクロールしても出てこない（HUD のラベル行が切れる）。 */
+  align-items:flex-start;
   justify-content:center;
   padding:12px;
   overflow-x:hidden;
 }
 
 #app{
-  width:min(640px,100%);
+  /* 横 640px と、画面の高さから HUD・凡例の分を引いた幅の小さい方。
+     0.9375 は canvas の 600/640（幅÷高さ）。これで縦にも必ず収まる。 */
+  /* 下限 504px は HUD が1行に収まる幅（セル 428 ＋ 隙間 40 ＋ 内外の余白 34）。
+     画面がこれより低い時は縦にスクロールさせる。HUD を潰すより見える方が良い。 */
+  width:min(640px, 100%, max(504px, calc((100dvh - 150px) * 0.9375)));
+  min-width:0;
+  margin:auto;
   display:flex;
   flex-direction:column;
   gap:10px;
@@ -40,6 +52,8 @@ body{
 /* ---------- HUD ---------- */
 #hud{
   display:flex;
+  /* どうしても1行に入らない幅の時は、重ねるのではなく折り返す */
+  flex-wrap:wrap;
   gap:10px;
   background:linear-gradient(180deg,#1d1430,#130d20);
   border:1px solid var(--line);
@@ -67,11 +81,12 @@ body{
 @keyframes bump{0%{transform:scale(1.5);color:var(--hot2)}100%{transform:scale(1)}}
 
 /* ---------- 爆弾の残数 ---------- */
-.hud-ammo{align-items:flex-end}
+/* 最大9個のピップと数値が隣のセルへはみ出さない幅を確保しておく */
+.hud-ammo{align-items:flex-end;min-width:128px}
 .ammo-row{display:flex;align-items:center;gap:8px}
-.pips{display:flex;gap:3px}
+.pips{display:flex;gap:2px}
 .pip{
-  width:8px;height:8px;border-radius:50%;
+  width:7px;height:7px;border-radius:50%;
   border:1px solid #4a3a6b;
   background:#1a1230;
   transition:background .12s ease, box-shadow .12s ease;
@@ -85,7 +100,7 @@ body{
   font-size:19px;font-weight:800;line-height:1;
   font-variant-numeric:tabular-nums;
   color:#ffd9a8;
-  min-width:44px;text-align:right;
+  min-width:38px;text-align:right;
 }
 .ammo-count i{font-style:normal;font-size:11px;opacity:.5;font-weight:600}
 .hud-ammo.empty .ammo-count{color:var(--hot);animation:pulse .5s infinite}
@@ -1414,6 +1429,18 @@ BM.DIRS = [
 
       BUILDERS[type](layer, cfg, { lo: this.exit.lo, hi: this.exit.hi });
 
+      // 動く層の作り直しの後で、開けた穴を必ず塗り直す
+      if (layer.dynamic && layer.refresh) {
+        layer.refresh = (function (fn) {
+          return function (t) {
+            fn.call(this, t);
+            if (this.punched) {
+              for (var k = 0; k < this.punched.length; k++) this.cells[this.punched[k]] = BM.T_EMPTY;
+            }
+          };
+        })(layer.refresh);
+      }
+
       // ときどきアイテムを浮かべる
       if (Math.random() < 0.3) {
         var pool = ['BOMB', 'BOMB', 'POWER', 'SHIELD', 'SLOW'];
@@ -1468,6 +1495,12 @@ BM.DIRS = [
     var l = this.byRow[row];
     if (!l || l.row !== row || !l.cells) return;
     l.cells[col] = v;
+    // 動く層は毎フレーム cells を作り直すので、そのままだと開けた穴が
+    // 次のフレームで塞がる。爆風で開けた穴は動いても残るのが正しい。
+    if (l.dynamic && v === BM.T_EMPTY) {
+      if (!l.punched) l.punched = [];
+      if (l.punched.indexOf(col) < 0) l.punched.push(col);
+    }
   };
 
   /* 画面より十分上に流れた地層を捨てる */
