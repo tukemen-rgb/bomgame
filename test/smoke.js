@@ -142,6 +142,106 @@ function installPilot() {
     return ok;
   }));
 
+  /* ---- 外部配信が壊れた時に、プレイヤーが閉じ込められないか ----
+     広告ブロッカー・通信の失敗・SDK の読み込み失敗は普通に起きる。
+     その時に結果画面へ戻れなくなるのが、この枠で一番まずい壊れ方。
+     実配信の中身はテストできないが、壊れ方への耐性は今テストできる。 */
+  console.log('  --- 外部配信が壊れた時 ---');
+  const adFail = await page.evaluate(async () => {
+    const out = {};
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    const fire = () => {
+      BM.ads.enabled = true;
+      BM.ads.everyN = 1; BM.ads.minGapMs = 0; BM.ads.skipAfter = 1;
+      BM.ads._count = 0; BM.ads._lastAt = 0;
+      BM.game.newRun(); BM.ui.hide();
+      BM.game.crash(BM.game.player, 7, BM.rowOf(BM.game.player.y));
+    };
+
+    // (1) fill() がその場で例外を投げる（スクリプトがブロックされた時の形）
+    BM.ads.provider = { fill: function () { throw new Error('blocked'); } };
+    fire();
+    out.threwShown = !!document.getElementById('ad-slot');
+    out.threwSlotFilled = !!document.querySelector('#ad-slot .ad-creative');
+    out.threwSkipEnabled = !document.getElementById('ad-skip').disabled;
+    document.getElementById('ad-skip').click();
+    await sleep(150);
+    out.threwReachedResult = document.getElementById('panel').textContent.indexOf('到達深度') >= 0;
+
+    // (2) fill() が永久に返事をしない
+    BM.ads.provider = { fill: function () { /* 何もしない */ } };
+    BM.ads.providerTimeoutMs = 400;
+    fire();
+    await sleep(1400);   // スキップが押せるようになる時間 + 見切り時間
+    out.hangSkipEnabled = !document.getElementById('ad-skip').disabled;
+    out.hangSlotFilled = !!document.querySelector('#ad-slot .ad-creative');
+    document.getElementById('ad-skip').click();
+    await sleep(150);
+    out.hangReachedResult = document.getElementById('panel').textContent.indexOf('到達深度') >= 0;
+
+    // (3) 正常な外部配信：done() を呼べば結果画面へ進む
+    BM.ads.provider = { fill: function (c, done) { c.innerHTML = '<b id="ext">ext</b>'; setTimeout(done, 50); } };
+    fire();
+    out.extShown = !!document.getElementById('ext');
+    await sleep(300);
+    out.extReachedResult = document.getElementById('panel').textContent.indexOf('到達深度') >= 0;
+
+    BM.ads.provider = null;
+    BM.ads.providerTimeoutMs = 8000;
+    return out;
+  });
+  check('例外を投げても枠は出て、スキップがすぐ押せる',
+    adFail.threwShown && adFail.threwSkipEnabled);
+  check('例外を投げたら自前の中身に差し替わる（枠が空にならない）', adFail.threwSlotFilled);
+  check('例外を投げても結果画面に戻れる', adFail.threwReachedResult);
+  check('無反応でもスキップが押せるようになる', adFail.hangSkipEnabled);
+  check('無反応なら見切って自前の中身に差し替わる', adFail.hangSlotFilled);
+  check('無反応でも結果画面に戻れる', adFail.hangReachedResult);
+  check('正常な外部配信は中身が出て、done() で結果画面へ進む',
+    adFail.extShown && adFail.extReachedResult);
+
+  /* ---- サイト内の他ゲームを宣伝する使い方 ---- */
+  console.log('  --- サイト内の宣伝として使う ---');
+  const promo = await page.evaluate(async () => {
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    const opened = [];
+    const realOpen = window.open;
+    window.open = function (url) { opened.push(url); return null; };
+    const clicked = [];
+    BM.ads.promos = [
+      { title: 'テストのゲーム', body: 'これは並べたもの', cta: '遊ぶ',
+        url: '/games/test', accent: '#8affd0', tag: 'おすすめ' }
+    ];
+    BM.ads.onClick = function (p) { clicked.push(p.title); };
+    BM.ads.enabled = true;
+    BM.ads.everyN = 1; BM.ads.minGapMs = 0; BM.ads.skipAfter = 1;
+    BM.ads._count = 0; BM.ads._lastAt = 0; BM.ads._pick = 0;
+    BM.game.newRun(); BM.ui.hide();
+    BM.game.crash(BM.game.player, 7, BM.rowOf(BM.game.player.y));
+
+    const out = {
+      title: (document.querySelector('#ad-slot .ad-title') || {}).textContent,
+      tag: (document.querySelector('#ad-slot .ad-tag') || {}).textContent,
+      label: (document.querySelector('.ad-label') || {}).textContent
+    };
+    document.querySelector('#ad-slot .ad-creative').click();
+    await sleep(150);
+    out.opened = opened.slice();
+    out.clicked = clicked.slice();
+    out.reachedResult = document.getElementById('panel').textContent.indexOf('到達深度') >= 0;
+
+    window.open = realOpen;
+    BM.ads.promos = null; BM.ads.onClick = null;
+    return out;
+  });
+  console.log(`  出た中身: 「${promo.title}」/ ラベル「${promo.label}」${promo.tag}` +
+              ` / 開いた先 ${JSON.stringify(promo.opened)} / 計測 ${JSON.stringify(promo.clicked)}`);
+  check('promos に入れたものが出る', promo.title === 'テストのゲーム');
+  check('宣伝であることを隠さない（ラベルが出ている）', promo.label === '広告');
+  check('押すと行き先が開く', promo.opened.length === 1 && promo.opened[0] === '/games/test');
+  check('押されたことを計測できる（onClick）', promo.clicked.length === 1);
+  check('押したあと結果画面へ進む', promo.reachedResult);
+
   /* ---- 自動操縦で実際に潜らせる ---- */
   await page.evaluate(installPilot);
   const depths = [];
