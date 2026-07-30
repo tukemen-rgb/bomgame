@@ -41,6 +41,8 @@
     this.deathLog = [];
     this.passedCount = 0;
     this.speedMul = 1;
+    this.coinRun = 0; this.coinRunT = 0;
+    this.reward = null;
     this.bgDust = [];
     for (var i = 0; i < 46; i++) {
       this.bgDust.push({ x: Math.random() * W, y: Math.random() * H, r: BM.rand(0.6, 2.2), s: BM.rand(0.15, 0.7) });
@@ -65,6 +67,8 @@
     this.zoneIndex = 0;
     this.deathLog = [];
     this.passedCount = 0;
+    this.coinRun = 0; this.coinRunT = 0;
+    this.reward = null;
     this.camY = this.player.y - H * 0.34;
     this.world.ensure(BM.rowOf(this.camY) + BM.VIEW_ROWS + 24);
     this.state = BM.S_PLAY;
@@ -80,6 +84,9 @@
     if (this.hitStop > 0) { this.hitStop -= dt; dt *= 0.2; }
     this.stateT += dt;
     if (this.chainT > 0) { this.chainT -= dt; if (this.chainT <= 0) this.chain = 0; }
+    // 結晶を続けて取ると倍率が上がる。少し離れると切れる
+    if (this.coinRunT > 0) { this.coinRunT -= dt; if (this.coinRunT <= 0) this.coinRun = 0; }
+    if (this.reward) { this.reward.t += dt; if (this.reward.t > 2.6) this.reward = null; }
 
     if (BM.autopilot.enabled) BM.autopilot.step(this);
 
@@ -349,24 +356,58 @@
   Game.prototype.checkItems = function () {
     var p = this.player;
     for (var i = 0; i < this.world.layers.length; i++) {
-      var it = this.world.layers[i].item;
-      if (!it || !it.alive) continue;
-      var ix = BM.centerX(it.col), iy = BM.centerY(it.row);
-      if (Math.abs(p.x - ix) < p.r + 14 && Math.abs(p.y - iy) < p.r + 14) {
+      var list = this.world.layers[i].items;
+      if (!list) continue;
+      for (var k = 0; k < list.length; k++) {
+        var it = list[k];
+        if (!it.alive) continue;
+        var ix = BM.centerX(it.col), iy = BM.centerY(it.row);
+        if (Math.abs(p.x - ix) >= p.r + 14 || Math.abs(p.y - iy) >= p.r + 14) continue;
         it.alive = false;
         var def = BM.ITEMS[it.type];
         switch (it.type) {
           case 'BOMB':   p.bombs = Math.min(BM.MAX_BOMBS, p.bombs + 1); break;
           case 'POWER':  p.power = Math.min(BM.MAX_POWER, p.power + 1); break;
-          case 'SHIELD': p.shield = Math.min(3, p.shield + 1); break;
+          case 'SHIELD': p.shield = Math.min(BM.SHIELD_MAX, p.shield + 1); break;
           case 'SLOW':   p.slow = 3.5; break;
+          // 結晶は取るほど連なって点が伸びる。落ちながらの寄り道の見返り
+          case 'COIN':
+            this.coinRun = (this.coinRun || 0) + 1;
+            this.coinRunT = 1.2;
+            break;
         }
-        this.score += 100;
-        this.fx.text(ix, iy - 14, def.label, def.color, 15);
+        if (it.type === 'COIN') {
+          var v = BM.COIN_SCORE * Math.min(5, this.coinRun);
+          this.score += v;
+          this.fx.text(ix, iy - 14, '+' + v + (this.coinRun > 1 ? ' ×' + Math.min(5, this.coinRun) : ''),
+                       def.color, 15);
+          BM.sound.coin(this.coinRun);
+        } else {
+          this.score += 100;
+          this.fx.text(ix, iy - 14, def.label, def.color, 15);
+          BM.sound.pickup();
+        }
         this.fx.sparkle(ix, iy, def.color);
-        BM.sound.pickup();
       }
     }
+  };
+
+  /* ご褒美の間に入った時。ここで確実に何かが増える。
+     深く潜っても景色しか変わらないと、深度そのものが目的にならない。 */
+  Game.prototype.grantReward = function (r) {
+    var p = this.player, k = r.kind, got = [];
+    if (k.bombsFull && p.bombs < BM.MAX_BOMBS) { p.bombs = BM.MAX_BOMBS; got.push('爆弾 満タン'); }
+    if (k.bombs) { p.bombs = Math.min(BM.MAX_BOMBS, p.bombs + k.bombs); got.push('爆弾 +' + k.bombs); }
+    if (k.shield) { p.shield = Math.min(BM.SHIELD_MAX, p.shield + k.shield); got.push('シールド +' + k.shield); }
+    if (k.slow) { p.slow = k.slow; got.push('スロー ' + k.slow + '秒'); }
+    this.score += r.bonus;
+    this.reward = { kind: k, t: 0, depth: r.depth, bonus: r.bonus };
+    this.fx.addFlash(0.3, '255,224,120');
+    this.fx.addShake(4);
+    // バナーは出さない。ご褒美の内容はトーストが全部書くので、
+    // 同じ文字が2枚重なって両方読めなくなる（100m ごとの地層バナーとも被る）
+    BM.ui.reward(r.depth, k, r.bonus, got);
+    BM.sound.reward();
   };
 
   Game.prototype.checkPassed = function () {
@@ -377,6 +418,7 @@
       if (p.y > (l.row + 1) * TILE) {
         l.passed = true;
         this.passedCount++;
+        if (l.reward) { this.grantReward(l.reward); continue; }
         this.score += 50;
         // ぎりぎりを抜けたら褒める
         var col = BM.colOf(p.x);
@@ -413,6 +455,7 @@
     this.fx.drawBelow(g);
     this.drawWalls(g, z);
     this.drawLayers(g, z);
+    this.drawRewardBands(g);
     this.drawItems(g);
     this.drawButtons(g);
     this.drawBombs(g);
@@ -642,24 +685,79 @@
 
   Game.prototype.drawItems = function (g) {
     for (var i = 0; i < this.world.layers.length; i++) {
-      var it = this.world.layers[i].item;
-      if (!it || !it.alive) continue;
-      var def = BM.ITEMS[it.type];
-      var x = BM.centerX(it.col), y = BM.centerY(it.row) + Math.sin(this.world.t * 3 + it.col) * 4;
+      var list = this.world.layers[i].items;
+      if (!list) continue;
+      for (var k = 0; k < list.length; k++) {
+        var it = list[k];
+        if (!it.alive) continue;
+        var def = BM.ITEMS[it.type];
+        var x = BM.centerX(it.col), y = BM.centerY(it.row) + Math.sin(this.world.t * 3 + it.col) * 4;
+        g.save();
+        g.translate(x, y);
+        if (it.type === 'COIN') {
+          // 結晶は小さく軽く。数が多いので四角い枠は付けない
+          g.rotate(this.world.t * 2.2 + it.col);
+          g.globalCompositeOperation = 'lighter';
+          var cg = g.createRadialGradient(0, 0, 1, 0, 0, 16);
+          cg.addColorStop(0, hexA(def.color, 0.55));
+          cg.addColorStop(1, hexA(def.color, 0));
+          g.fillStyle = cg;
+          g.beginPath(); g.arc(0, 0, 16, 0, 6.3); g.fill();
+          g.globalCompositeOperation = 'source-over';
+          g.fillStyle = def.color;
+          g.beginPath();
+          g.moveTo(0, -8); g.lineTo(6, 0); g.lineTo(0, 8); g.lineTo(-6, 0);
+          g.closePath(); g.fill();
+          g.fillStyle = 'rgba(255,255,255,.75)';
+          g.beginPath(); g.moveTo(0, -8); g.lineTo(3, -2); g.lineTo(0, 1); g.lineTo(-3, -2);
+          g.closePath(); g.fill();
+          g.restore();
+          continue;
+        }
+        g.globalCompositeOperation = 'lighter';
+        var gr = g.createRadialGradient(0, 0, 2, 0, 0, 24);
+        gr.addColorStop(0, hexA(def.color, 0.5));
+        gr.addColorStop(1, hexA(def.color, 0));
+        g.fillStyle = gr;
+        g.beginPath(); g.arc(0, 0, 24, 0, 6.3); g.fill();
+        g.globalCompositeOperation = 'source-over';
+        g.beginPath(); BM.roundRect(g, -13, -13, 26, 26, 8); g.fillStyle = 'rgba(16,10,28,.92)'; g.fill();
+        g.strokeStyle = def.color; g.lineWidth = 2; g.stroke();
+        g.font = '15px system-ui, sans-serif';
+        g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.fillText(def.glyph, 0, 1);
+        g.restore();
+      }
+    }
+  };
+
+  /* ご褒美の間の見た目。岩が無いだけだと「生成が抜けた」ようにも見えるので、
+     入口に光る帯と名前を出して、意図してある空間だと分かるようにする。 */
+  Game.prototype.drawRewardBands = function (g) {
+    for (var i = 0; i < this.world.layers.length; i++) {
+      var l = this.world.layers[i];
+      if (l.type !== 'reward' || !l.reward) continue;
+      var y = l.row * TILE, c = l.kind.color;
       g.save();
-      g.translate(x, y);
-      g.globalCompositeOperation = 'lighter';
-      var gr = g.createRadialGradient(0, 0, 2, 0, 0, 24);
-      gr.addColorStop(0, hexA(def.color, 0.5));
-      gr.addColorStop(1, hexA(def.color, 0));
+      var gr = g.createLinearGradient(0, y - 26, 0, y + 26);
+      gr.addColorStop(0, hexA(c, 0));
+      gr.addColorStop(0.5, hexA(c, 0.5));
+      gr.addColorStop(1, hexA(c, 0));
       g.fillStyle = gr;
-      g.beginPath(); g.arc(0, 0, 24, 0, 6.3); g.fill();
-      g.globalCompositeOperation = 'source-over';
-      g.beginPath(); BM.roundRect(g, -13, -13, 26, 26, 8); g.fillStyle = 'rgba(16,10,28,.92)'; g.fill();
-      g.strokeStyle = def.color; g.lineWidth = 2; g.stroke();
-      g.font = '15px system-ui, sans-serif';
-      g.textAlign = 'center'; g.textBaseline = 'middle';
-      g.fillText(def.glyph, 0, 1);
+      g.fillRect(L * TILE, y - 26, (R - L + 1) * TILE, 52);
+      g.strokeStyle = hexA(c, 0.9); g.lineWidth = 2;
+      g.beginPath(); g.moveTo(L * TILE, y); g.lineTo((R + 1) * TILE, y); g.stroke();
+      // 文字は左寄せ。中央に置くと、入った直後に出る中央のトーストと
+      // 帯が上へ流れる途中で必ず重なって、両方読めなくなる。
+      var tx = L * TILE + 10;
+      g.fillStyle = hexA(c, 0.95);
+      g.font = '900 15px system-ui, sans-serif';
+      g.textAlign = 'left'; g.textBaseline = 'bottom';
+      g.fillText(l.reward.depth + 'm  ' + l.kind.name, tx, y - 7);
+      g.font = '600 10px system-ui, sans-serif';
+      g.textBaseline = 'top';
+      g.fillStyle = hexA(c, 0.7);
+      g.fillText(l.kind.desc + '   +' + l.reward.bonus, tx, y + 7);
       g.restore();
     }
   };
@@ -989,8 +1087,36 @@
         g.fillText(m + 'm', W - 15, y + 3);
       }
     }
+    this.drawNextReward(g);
     g.restore();
     void x;
+  };
+
+  /* 次のご褒美までの残り。次に何が待っているかが見えていないと、
+     ただ落ちているだけになる。深さに終わりが無いので、
+     目標は常に「次の節目」になる。 */
+  Game.prototype.drawNextReward = function (g) {
+    var d = this.player.deepest;
+    var mile = Math.floor(d / BM.MILESTONE_ROWS) + 1;
+    var next = mile * BM.MILESTONE_ROWS;
+    var kind = this.world.rewardAt(mile);
+    var left = next - d;
+    var near = left <= 40;
+    g.save();
+    g.textAlign = 'right';
+    g.font = '800 11px system-ui, sans-serif';
+    g.fillStyle = hexA(kind.color, near ? 0.95 : 0.6);
+    g.fillText('次 ' + next + 'm  ' + kind.name, W - 16, 16);
+    g.font = '700 10px system-ui, sans-serif';
+    g.fillStyle = 'rgba(255,255,255,' + (near ? 0.8 : 0.42) + ')';
+    g.fillText('あと ' + left + 'm', W - 16, 30);
+    // 残りをそのまま帯にする
+    var frac = 1 - left / BM.MILESTONE_ROWS;
+    g.fillStyle = 'rgba(255,255,255,.12)';
+    g.fillRect(W - 96, 36, 80, 3);
+    g.fillStyle = hexA(kind.color, near ? 0.95 : 0.55);
+    g.fillRect(W - 96, 36, 80 * BM.clamp(frac, 0, 1), 3);
+    g.restore();
   };
 
   /* 構造確認モードの状態表示。

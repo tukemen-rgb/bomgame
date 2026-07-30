@@ -244,6 +244,108 @@
     this.lastType = '';
     this.t = 0;
     this.deepest = 0;
+    // ご褒美の間。mileDone は「何個目の節目まで置いたか」
+    this.mileDone = 0;
+    this.rewardLeft = 0;
+    this.rewardKind = null;
+    this.rewardHead = false;
+    this.rewardPlan = [];
+  };
+
+  /* 節目の中身。深さ（=節目の番号）だけで決まるようにしておく。
+     乱数で選ぶと、同じ深度を検査しても毎回違う結果になって確かめられない。 */
+  World.prototype.rewardAt = function (mile) {
+    if (mile % BM.BIG_EVERY === 0) return BM.REWARD_BIG;
+    // 大空洞が挟まると番号がずれて、特定の種類だけ出にくくなる。
+    // 大空洞のぶんを引いてから巡回させると4種が均等に回る。
+    var i = mile - Math.floor(mile / BM.BIG_EVERY);
+    return BM.REWARDS[(i - 1) % BM.REWARDS.length];
+  };
+
+  /* ご褒美の間に浮かべるものを、空間全体に配置してから配る。
+     結晶は落ちながら回収するものなので、蛇行する線に並べる。
+     取り逃しても損は無い（＝任意の寄り道）ようにしてある。 */
+  World.prototype.planReward = function (kind, row0, spanRows, cfg) {
+    var plan = [], mid = Math.round((L + R) / 2), i;
+    var list = kind.items || [];
+    for (i = 0; i < list.length; i++) {
+      // 入口の直後に置くと、そこへ横移動する時間が無くて取れない。
+      // 確定で渡すつもりの物なので、間を空けて中央寄りに置く。
+      plan.push({
+        type: list[i],
+        col: BM.clamp(mid + Math.round((i - (list.length - 1) / 2) * 2), L + 1, R - 1),
+        row: row0 + 6 + i * 4
+      });
+    }
+    var n = kind.coins || 0;
+    if (n > 0) {
+      var top = row0 + 8 + list.length * 4;
+      var step = Math.max(2, Math.floor((spanRows - (top - row0) - 2) / n));
+      // 蛇行の幅は「次の結晶までに横へ動ける距離」で決める。
+      // 固定値にすると、深いところでは結晶の列が自分より速く逃げて、
+      // 1個も取れない飾りになる。
+      // 角度から計算するだけでは列を整数に丸めた時にはみ出すので、
+      // 並べたあとに隣との差を実際に詰めて必ず追えるようにする。
+      var amp = 4;
+      var perStep = cfg.moveSpeed * (step * TILE / cfg.vTerm) / TILE;
+      var maxStep = Math.max(1, Math.floor(perStep * 0.75));
+      var dphase = Math.min(0.62, (perStep * 0.7) / amp);
+      var prev = null;
+      for (i = 0; i < n; i++) {
+        var col = mid + Math.round(Math.sin(i * dphase) * amp);
+        if (prev !== null) col = BM.clamp(col, prev - maxStep, prev + maxStep);
+        col = BM.clamp(col, L + 1, R - 1);
+        prev = col;
+        plan.push({ type: 'COIN', col: col, row: top + i * step });
+      }
+    }
+    return plan;
+  };
+
+  /* ご褒美の間の1枚。全マス空なので、ここでは絶対に死なない。 */
+  World.prototype.pushReward = function (rows, cfg) {
+    var spacing = cfg.spacing;
+    var layer = {
+      row: rows, type: 'reward', t: 0, phase: 0,
+      cells: newCells(BM.T_EMPTY),
+      gapX: Math.round((L + R) / 2),
+      button: null, dynamic: false, hint: '',
+      items: [], passed: false,
+      // 全マス空なので出口は縦坑の全幅。どこに居るかは決まらないので exitFree は立てない
+      exit: [L, R], exitFree: false,
+      kind: this.rewardKind, reward: null
+    };
+    if (this.rewardHead) {
+      this.rewardHead = false;
+      layer.reward = {
+        kind: this.rewardKind,
+        mile: this.mileDone,
+        depth: this.mileDone * BM.MILESTONE_ROWS,
+        // 節目ごとに増えるが、増え続けると点が壊れるので上限を置く
+        bonus: BM.MILESTONE_BONUS * Math.min(this.mileDone, BM.MILESTONE_BONUS_CAP)
+      };
+    }
+    // 自分の担当区間にあるものだけ持つ。全部を先頭の層に持たせると、
+    // 画面外へ流れて層が捨てられた時に、まだ下にある結晶まで消える。
+    var keep = [], i;
+    for (i = 0; i < this.rewardPlan.length; i++) {
+      var e = this.rewardPlan[i];
+      if (e.row >= rows && (this.rewardLeft > 1 ? e.row < rows + spacing : true)) {
+        layer.items.push({ col: e.col, row: e.row, type: e.type, t: 0, alive: true });
+      } else keep.push(e);
+    }
+    this.rewardPlan = keep;
+    this.rewardLeft--;
+
+    this.layers.push(layer);
+    this.byRow[rows] = layer;
+    // どの列に居るかは決まらないので、次の穴は「両端から届く位置」に限る
+    this.exit = { lo: L, hi: R };
+    this.exitFree = false;
+    this.lastType = 'reward';
+    this.lastRow = rows;
+    this.nextRow = rows + spacing;
+    this.deepest = rows;
   };
 
   /* 横移動の速さも深度で上げる。落下だけ速くすると比率が壊れる。 */
@@ -285,6 +387,23 @@
       var cfg = this.difficulty(rows);
       cfg.vTerm = this.vTerm(rows);
       cfg.moveSpeed = this.moveSpeed(rows);
+      /* ---- 200m ごとのご褒美の間（底なし＝深さに終わりが無いので巡回する） ----
+         やっているのは「岩を置かないこと」だけ。層自体は普通に置くので、
+         到達可能性も可視性も自動的に満たされる。ここを特別扱いして
+         層を飛ばすと、その区間だけ不変条件の外に出てしまう。 */
+      var mile = Math.floor(rows / BM.MILESTONE_ROWS);
+      if (this.rewardLeft <= 0 && mile > this.mileDone && !this.debugType) {
+        this.mileDone = mile;
+        this.rewardKind = this.rewardAt(mile);
+        this.rewardLeft = (mile % BM.BIG_EVERY === 0) ? BM.BIG_SPAN : BM.REWARD_SPAN;
+        this.rewardHead = true;
+        this.rewardPlan = this.planReward(this.rewardKind, rows, this.rewardLeft * cfg.spacing, cfg);
+      }
+      if (this.rewardLeft > 0) {
+        this.pushReward(rows, cfg);
+        continue;
+      }
+
       // debugType はテスト専用。1種類の地層だけを並べて通れるか確かめるのに使う
       var type = this.debugType || pickType(rows, this.lastType);
 
@@ -317,7 +436,7 @@
         button: null,
         dynamic: false,
         hint: '',
-        item: null,
+        items: [],
         passed: false
       };
 
@@ -375,13 +494,13 @@
       // ときどきアイテムを浮かべる
       if (Math.random() < 0.3) {
         var pool = ['BOMB', 'BOMB', 'POWER', 'SHIELD', 'SLOW'];
-        layer.item = {
+        layer.items.push({
           col: BM.clamp(layer.gapX + BM.randInt(-1, 1), L, R),
           row: layer.row - BM.randInt(2, 4),
           type: BM.pick(pool),
           t: 0,
           alive: true
-        };
+        });
       }
 
       this.layers.push(layer);

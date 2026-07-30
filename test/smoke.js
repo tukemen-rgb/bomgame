@@ -233,6 +233,97 @@ function installPilot() {
   }
   await page.evaluate(() => { BM.game.world.debugType = null; });
 
+  /* ---- 200m ごとのご褒美の間 ----
+     深さに終わりが無いので、ここが抜けると「潜る理由」が無くなる。
+     節目が1つでも欠けていないこと・そこでは絶対に死なないことを見る。 */
+  console.log('  --- ご褒美の間（200m ごと・底なし）---');
+  const MC = await page.evaluate(() => ({
+    rows: BM.MILESTONE_ROWS, bonus: BM.MILESTONE_BONUS, kinds: BM.REWARDS.length + 1
+  }));
+  const ms = await page.evaluate(() => {
+    const w = new BM.World(); w.reset();
+    // ensure() は1回で作る層数に上限があるので、少しずつ伸ばす
+    for (let r = 600; r <= 6000; r += 600) w.ensure(r);
+    const heads = w.layers.filter(l => l.reward).map(l => ({
+      depth: l.reward.depth, kind: l.kind.key, bonus: l.reward.bonus, row: l.row
+    }));
+    const rew = w.layers.filter(l => l.type === 'reward');
+    // 節目ごとに何枚開いているか
+    const span = {};
+    rew.forEach(l => { const m = Math.floor(l.row / BM.MILESTONE_ROWS); span[m] = (span[m] || 0) + 1; });
+    // 全マス空か（＝そこでは死ねない）
+    const notOpen = rew.filter(l => {
+      for (let c = BM.PLAY_L; c <= BM.PLAY_R; c++) if (l.cells[c] !== BM.T_EMPTY) return true;
+      return false;
+    }).length;
+    // 結晶が「落ちながら追える」間隔に並んでいるか
+    let coinTooFar = 0, coinPairs = 0;
+    rew.forEach(l => {
+      const coins = l.items.filter(i => i.type === 'COIN').sort((a, b) => a.row - b.row);
+      for (let i = 1; i < coins.length; i++) {
+        const drow = coins[i].row - coins[i - 1].row;
+        const reach = w.moveSpeed(l.row) * (drow * BM.TILE / w.vTerm(l.row)) / BM.TILE;
+        coinPairs++;
+        if (Math.abs(coins[i].col - coins[i - 1].col) > reach) coinTooFar++;
+      }
+    });
+    return { heads, span, notOpen, coinTooFar, coinPairs };
+  });
+  const miles = ms.heads.map(h => h.depth);
+  const wantMiles = [];
+  for (let m = MC.rows; m <= 6000 - MC.rows; m += MC.rows) wantMiles.push(m);
+  const missing = wantMiles.filter(m => miles.indexOf(m) < 0);
+  console.log(`  節目 ${miles.length} 個: ${miles.slice(0, 8).join(', ')} ... ${miles.slice(-2).join(', ')}`);
+  console.log('  中身:', JSON.stringify(ms.heads.slice(0, 10).map(h => h.depth + ':' + h.kind)));
+  check(`${MC.rows}m ごとに必ずご褒美がある（欠け ${missing.length} 個）`, missing.length === 0);
+  check('ご褒美の間は全マス空＝そこでは死なない', ms.notOpen === 0);
+  const kinds = new Set(ms.heads.map(h => h.kind));
+  check(`中身が${MC.kinds}種すべて出る（${[...kinds].join(',')}）`, kinds.size === MC.kinds);
+  const bigs = ms.heads.filter(h => h.kind === 'cavern').map(h => h.depth);
+  check(`1000m ごとが大空洞（${bigs.slice(0, 5).join(', ')}）`,
+    bigs.length > 0 && bigs.every(d => d % 1000 === 0));
+  check(`結晶が落ちながら追える間隔（${ms.coinPairs} 組中 ${ms.coinTooFar} 組が届かない）`, ms.coinTooFar === 0);
+  check('節目ごとにボーナスが増える',
+    ms.heads.length > 3 && ms.heads[1].bonus > ms.heads[0].bonus);
+
+  // 底なし＝どんなに深くても節目が来る
+  const deepMile = await page.evaluate(() => {
+    const w = new BM.World(); w.reset();
+    w.nextRow = 100000; w.lastRow = 100000; w.mileDone = Math.floor(100000 / BM.MILESTONE_ROWS);
+    w.ensure(100600);
+    const h = w.layers.filter(l => l.reward).map(l => ({ depth: l.reward.depth, kind: l.kind.key }));
+    return h;
+  });
+  console.log('  100,000m 付近:', JSON.stringify(deepMile));
+  check('10万m 付近でもご褒美が生成される（底なし）', deepMile.length >= 2);
+
+  // 実プレイで本当に効くか（爆弾が満タンになる・点が入る）
+  const grant = await page.evaluate(async () => {
+    const g = BM.game;
+    g.newRun(); BM.ui.hide();
+    g.noDeath = true;
+    g.player.bombs = 0;
+    // 200m の直前まで一気に落とす
+    const row = 200 - 4;
+    g.player.y = row * BM.TILE;
+    g.camY = g.player.y - BM.VIEW_H * 0.3;
+    g.world.reset();
+    g.world.nextRow = row - 12; g.world.lastRow = row - 12;
+    g.world.mileDone = 0;
+    g.world.ensure(row + 60);
+    const before = { bombs: g.player.bombs, score: g.score };
+    for (let i = 0; i < 900; i++) g.update(1 / 120);
+    g.noDeath = false;
+    return { before, bombs: g.player.bombs, score: g.score, depth: g.player.deepest,
+             gotToast: !!document.querySelector('#reward-toast .rw-name'),
+             toast: (document.querySelector('#reward-toast .rw-name') || {}).textContent || '' };
+  });
+  console.log(`  実プレイ: 爆弾 ${grant.before.bombs}→${grant.bombs} / 点 ${grant.before.score}→${grant.score}` +
+              ` / ${grant.depth}m / トースト「${grant.toast}」`);
+  check('ご褒美を通ると実際に補給される', grant.bombs > grant.before.bombs);
+  check(`到達ボーナス ${MC.bonus} が入る`, grant.score >= grant.before.score + MC.bonus);
+  check('もらった内容が画面に出る', grant.gotToast);
+
   /* ---- 隙間の作り方が一通り出てくるか ---- */
   const seen = await page.evaluate(() => {
     const w = new BM.World();

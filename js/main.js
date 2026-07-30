@@ -73,6 +73,7 @@
         el.shieldPips.appendChild(sp);
       }
       el.banner = document.getElementById('combo-banner');
+      el.rewardToast = document.getElementById('reward-toast');
     },
     hide: function () { BM.ads.cancel(); el.overlay.classList.add('hidden'); },
     show: function (html) { el.panel.innerHTML = html; el.overlay.classList.remove('hidden'); },
@@ -83,6 +84,24 @@
       void el.banner.offsetWidth;
       el.banner.classList.add('show');
     },
+    /* ご褒美の間。何をもらったのかを文字で出す。
+       演出だけだと「光ったけど何が起きた?」で終わる。 */
+    reward: function (depth, kind, bonus, got) {
+      var n = el.rewardToast;
+      if (!n) return;
+      n.style.setProperty('--rw', kind.color);
+      n.innerHTML =
+        '<div class="rw-depth">' + depth + 'm 到達</div>' +
+        '<div class="rw-name">' + kind.name + '</div>' +
+        (got && got.length
+          ? '<div class="rw-got">' + got.map(function (t) { return '<span>' + t + '</span>'; }).join('') + '</div>'
+          : '<div class="rw-got"><span>' + kind.desc + '</span></div>') +
+        '<div class="rw-bonus">+' + bonus.toLocaleString('en-US') + '</div>';
+      n.classList.remove('show');
+      void n.offsetWidth;
+      n.classList.add('show');
+    },
+
     bump: function (node) { node.classList.remove('bump'); void node.offsetWidth; node.classList.add('bump'); },
 
     _d: -1, _s: -1, _b: -1, _sh: -1,
@@ -153,6 +172,11 @@
         '画面右上の丸が残数。<b style="color:#ff8a6a">0になると赤く点滅し、押しても空振りする</b>ので、<br>' +
         'どの層で使うかを決めてから落とすこと。💣 のアイテムで1個補充できる。</p>' +
         '<p>100m ごとに地層が変わり、落下速度も層の間隔も上がっていく。</p>' +
+        '<p><b style="color:#ffe066">200m ごとに「ご褒美の間」がある。</b>' +
+        'その区間だけ岩が無く、爆弾の補給・シールド・爆風アップ・結晶（💠 点数）が' +
+        '待っている。中身は4種を巡回し、<b>1000m ごとは全部盛りの大空洞</b>。<br>' +
+        '画面右上に次の節目と残り距離が出ている。<b>深さに終わりは無い</b>ので、' +
+        '目標は常に次の節目。</p>' +
         '</div>' +
         '<div class="menu"><button data-act="back">◀ もどる</button></div>'
       );

@@ -82,8 +82,37 @@ BM.ITEMS = {
   BOMB:   { key: 'BOMB',   label: '爆弾 +1',   glyph: '💣', color: '#ffd9a8' },
   POWER:  { key: 'POWER',  label: '爆風アップ', glyph: '🔥', color: '#ff8a4c' },
   SHIELD: { key: 'SHIELD', label: 'シールド',   glyph: '🛡', color: '#8ce8ff' },
-  SLOW:   { key: 'SLOW',   label: 'スロー',     glyph: '🌀', color: '#c9a6ff' }
+  SLOW:   { key: 'SLOW',   label: 'スロー',     glyph: '🌀', color: '#c9a6ff' },
+  COIN:   { key: 'COIN',   label: '結晶',       glyph: '💠', color: '#ffe066' }
 };
+
+/* ---------- ご褒美の間（200m ごと・底なしで無限に続く） ----------
+   400m から先は難易度カーブが飽和して、構造としては同じものの繰り返しになる。
+   それだけだと深く潜る理由が無くなるので、200m ごとに必ず開けた空間を置いて
+   息をつかせ、確実な見返りを渡す。深さに終わりは無いので、
+   中身は4種を巡回させ、1000m ごとに全部盛りの大空洞にする。 */
+BM.MILESTONE_ROWS = 200;   // 何m ごとにご褒美を置くか
+BM.REWARD_SPAN    = 3;     // 開けたままにする層の数（この間は岩が無い）
+BM.BIG_EVERY      = 5;     // 何回ごとに大空洞にするか（5 → 1000m ごと）
+BM.BIG_SPAN       = 5;
+BM.MILESTONE_BONUS = 500;  // 到達ボーナス。節目ごとに増える
+BM.MILESTONE_BONUS_CAP = 20;  // 増え続けると点が壊れるので、この節目で止める
+BM.COIN_SCORE     = 120;   // 結晶1個の点
+
+/* 中身のレパートリー。巡回するので、どこまで潜っても次のご褒美が来る */
+BM.REWARDS = [
+  { key: 'supply', name: '補給の間',  color: '#ffd9a8',
+    desc: '爆弾を満タンに', bombsFull: true, items: ['BOMB', 'BOMB'], coins: 3 },
+  { key: 'trove',  name: '宝物庫',    color: '#ffe066',
+    desc: '結晶をかき集めろ', coins: 12 },
+  { key: 'relic',  name: '遺物の間',  color: '#8ce8ff',
+    desc: 'シールドと爆風', items: ['SHIELD', 'POWER'], coins: 3 },
+  { key: 'tail',   name: '追い風の間', color: '#c9a6ff',
+    desc: '落下がゆるむ', slow: 6, bombs: 2, items: ['SLOW'], coins: 5 }
+];
+BM.REWARD_BIG = { key: 'cavern', name: '大空洞', color: '#8affd0',
+  desc: '全部持っていけ', bombsFull: true, shield: 1,
+  items: ['SHIELD', 'POWER', 'BOMB'], coins: 18 };
 
 /* ---------- 保存 ---------- */
 BM.store = {

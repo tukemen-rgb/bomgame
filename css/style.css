@@ -274,6 +274,49 @@ canvas#game{
   100%{opacity:0;transform:translate(-50%,-90%) scale(.9)}
 }
 
+/* ---------- ご褒美の間（200m ごと） ----------
+   何をもらったのかが文字で残らないと、ただ光っただけで終わってしまう。 */
+#reward-toast{
+  /* 上のほうに置く。中央だとプレイヤー自身と、22% にある
+     コンボ/地層バナーの両方に重なって読めない */
+  position:absolute;left:50%;top:12%;
+  transform:translate(-50%,-50%);
+  min-width:236px;max-width:82%;
+  padding:13px 20px 14px;
+  border-radius:12px;
+  border:1px solid var(--rw,#ffe066);
+  background:linear-gradient(180deg,rgba(24,17,40,.94),rgba(12,8,22,.94));
+  box-shadow:0 10px 40px rgba(0,0,0,.6), 0 0 26px -6px var(--rw,#ffe066);
+  text-align:center;
+  /* #stage-wrap が line-height:0（canvas の余白を消すため）なので、
+     指定しないと行が全部重なって読めない */
+  line-height:1.35;
+  opacity:0;pointer-events:none;
+}
+#reward-toast .rw-name{
+  font-size:20px;font-weight:900;line-height:1.25;letter-spacing:.04em;color:var(--rw,#ffe066);
+  text-shadow:0 0 16px var(--rw,#ffe066);
+}
+#reward-toast .rw-depth{font-size:11px;font-weight:800;letter-spacing:.16em;color:var(--dim);margin-bottom:2px}
+#reward-toast .rw-got{
+  display:flex;flex-wrap:wrap;gap:4px 6px;justify-content:center;margin-top:8px;
+}
+#reward-toast .rw-got span{
+  font-size:12px;font-weight:700;color:#f4ecff;
+  border:1px solid rgba(255,255,255,.22);
+  background:rgba(255,255,255,.06);
+  border-radius:999px;padding:2px 9px;
+}
+#reward-toast .rw-bonus{font-size:13px;font-weight:800;color:#ffd23d;margin-top:7px}
+#reward-toast.show{animation:rwPop 2.6s cubic-bezier(.16,1.1,.3,1) forwards}
+@keyframes rwPop{
+  0%{opacity:0;transform:translate(-50%,-50%) scale(.7)}
+  10%{opacity:1;transform:translate(-50%,-50%) scale(1.04)}
+  18%{transform:translate(-50%,-50%) scale(1)}
+  80%{opacity:1}
+  100%{opacity:0;transform:translate(-50%,-72%) scale(.96)}
+}
+
 /* ---------- touch ---------- */
 /* 落ちるゲームなので上入力が無い。横・急降下・爆弾の3つだけを大きく置く */
 #touch{display:none;justify-content:center;align-items:center;gap:10px;padding:4px 2px}

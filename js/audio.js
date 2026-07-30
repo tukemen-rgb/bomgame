@@ -198,6 +198,28 @@
   };
 
 
+  /* 結晶。連続で取るので短く、取るたび少し上がる */
+  Sound.prototype.coin = function (n) {
+    if (!this.ctx) return;
+    var t = this._now();
+    var k = Math.min(8, Math.max(1, n || 1));
+    var f = 880 * Math.pow(1.0595, (k - 1) * 2);
+    this._tone({ at: t, type: 'triangle', f0: f, dur: 0.07, vol: 0.11 });
+    this._tone({ at: t + 0.035, type: 'triangle', f0: f * 1.5, dur: 0.09, vol: 0.09 });
+  };
+
+  /* ご褒美の間に入った。ここだけは派手にする */
+  Sound.prototype.reward = function () {
+    if (!this.ctx) return;
+    var t = this._now();
+    [523, 659, 784, 1046, 1318].forEach(function (f, i) {
+      this._tone({ at: t + i * 0.07, type: 'triangle', f0: f, dur: 0.42, vol: 0.15 });
+      this._tone({ at: t + i * 0.07, type: 'square', f0: f * 2, dur: 0.16, vol: 0.05 });
+    }, this);
+    this._tone({ at: t + 0.35, type: 'sine', f0: 130, f1: 65, dur: 0.7, vol: 0.22, exp: true });
+    this._noiseBurst({ at: t, filter: 'highpass', fStart: 1200, fEnd: 6000, dur: 0.5, vol: 0.07 });
+  };
+
   Sound.prototype.pickup = function () {
     if (!this.ctx) return;
     var t = this._now();

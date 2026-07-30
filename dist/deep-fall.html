@@ -281,6 +281,49 @@ canvas#game{
   100%{opacity:0;transform:translate(-50%,-90%) scale(.9)}
 }
 
+/* ---------- ご褒美の間（200m ごと） ----------
+   何をもらったのかが文字で残らないと、ただ光っただけで終わってしまう。 */
+#reward-toast{
+  /* 上のほうに置く。中央だとプレイヤー自身と、22% にある
+     コンボ/地層バナーの両方に重なって読めない */
+  position:absolute;left:50%;top:12%;
+  transform:translate(-50%,-50%);
+  min-width:236px;max-width:82%;
+  padding:13px 20px 14px;
+  border-radius:12px;
+  border:1px solid var(--rw,#ffe066);
+  background:linear-gradient(180deg,rgba(24,17,40,.94),rgba(12,8,22,.94));
+  box-shadow:0 10px 40px rgba(0,0,0,.6), 0 0 26px -6px var(--rw,#ffe066);
+  text-align:center;
+  /* #stage-wrap が line-height:0（canvas の余白を消すため）なので、
+     指定しないと行が全部重なって読めない */
+  line-height:1.35;
+  opacity:0;pointer-events:none;
+}
+#reward-toast .rw-name{
+  font-size:20px;font-weight:900;line-height:1.25;letter-spacing:.04em;color:var(--rw,#ffe066);
+  text-shadow:0 0 16px var(--rw,#ffe066);
+}
+#reward-toast .rw-depth{font-size:11px;font-weight:800;letter-spacing:.16em;color:var(--dim);margin-bottom:2px}
+#reward-toast .rw-got{
+  display:flex;flex-wrap:wrap;gap:4px 6px;justify-content:center;margin-top:8px;
+}
+#reward-toast .rw-got span{
+  font-size:12px;font-weight:700;color:#f4ecff;
+  border:1px solid rgba(255,255,255,.22);
+  background:rgba(255,255,255,.06);
+  border-radius:999px;padding:2px 9px;
+}
+#reward-toast .rw-bonus{font-size:13px;font-weight:800;color:#ffd23d;margin-top:7px}
+#reward-toast.show{animation:rwPop 2.6s cubic-bezier(.16,1.1,.3,1) forwards}
+@keyframes rwPop{
+  0%{opacity:0;transform:translate(-50%,-50%) scale(.7)}
+  10%{opacity:1;transform:translate(-50%,-50%) scale(1.04)}
+  18%{transform:translate(-50%,-50%) scale(1)}
+  80%{opacity:1}
+  100%{opacity:0;transform:translate(-50%,-72%) scale(.96)}
+}
+
 /* ---------- touch ---------- */
 /* 落ちるゲームなので上入力が無い。横・急降下・爆弾の3つだけを大きく置く */
 #touch{display:none;justify-content:center;align-items:center;gap:10px;padding:4px 2px}
@@ -343,6 +386,7 @@ canvas#game{
     </div>
 
     <div id="combo-banner"></div>
+    <div id="reward-toast"></div>
   </div>
 
   <div id="touch" aria-hidden="true">
@@ -446,8 +490,37 @@ BM.ITEMS = {
   BOMB:   { key: 'BOMB',   label: '爆弾 +1',   glyph: '💣', color: '#ffd9a8' },
   POWER:  { key: 'POWER',  label: '爆風アップ', glyph: '🔥', color: '#ff8a4c' },
   SHIELD: { key: 'SHIELD', label: 'シールド',   glyph: '🛡', color: '#8ce8ff' },
-  SLOW:   { key: 'SLOW',   label: 'スロー',     glyph: '🌀', color: '#c9a6ff' }
+  SLOW:   { key: 'SLOW',   label: 'スロー',     glyph: '🌀', color: '#c9a6ff' },
+  COIN:   { key: 'COIN',   label: '結晶',       glyph: '💠', color: '#ffe066' }
 };
+
+/* ---------- ご褒美の間（200m ごと・底なしで無限に続く） ----------
+   400m から先は難易度カーブが飽和して、構造としては同じものの繰り返しになる。
+   それだけだと深く潜る理由が無くなるので、200m ごとに必ず開けた空間を置いて
+   息をつかせ、確実な見返りを渡す。深さに終わりは無いので、
+   中身は4種を巡回させ、1000m ごとに全部盛りの大空洞にする。 */
+BM.MILESTONE_ROWS = 200;   // 何m ごとにご褒美を置くか
+BM.REWARD_SPAN    = 3;     // 開けたままにする層の数（この間は岩が無い）
+BM.BIG_EVERY      = 5;     // 何回ごとに大空洞にするか（5 → 1000m ごと）
+BM.BIG_SPAN       = 5;
+BM.MILESTONE_BONUS = 500;  // 到達ボーナス。節目ごとに増える
+BM.MILESTONE_BONUS_CAP = 20;  // 増え続けると点が壊れるので、この節目で止める
+BM.COIN_SCORE     = 120;   // 結晶1個の点
+
+/* 中身のレパートリー。巡回するので、どこまで潜っても次のご褒美が来る */
+BM.REWARDS = [
+  { key: 'supply', name: '補給の間',  color: '#ffd9a8',
+    desc: '爆弾を満タンに', bombsFull: true, items: ['BOMB', 'BOMB'], coins: 3 },
+  { key: 'trove',  name: '宝物庫',    color: '#ffe066',
+    desc: '結晶をかき集めろ', coins: 12 },
+  { key: 'relic',  name: '遺物の間',  color: '#8ce8ff',
+    desc: 'シールドと爆風', items: ['SHIELD', 'POWER'], coins: 3 },
+  { key: 'tail',   name: '追い風の間', color: '#c9a6ff',
+    desc: '落下がゆるむ', slow: 6, bombs: 2, items: ['SLOW'], coins: 5 }
+];
+BM.REWARD_BIG = { key: 'cavern', name: '大空洞', color: '#8affd0',
+  desc: '全部持っていけ', bombsFull: true, shield: 1,
+  items: ['SHIELD', 'POWER', 'BOMB'], coins: 18 };
 
 /* ---------- 保存 ---------- */
 BM.store = {
@@ -686,6 +759,28 @@ BM.DIRS = [
     this._tone({ at: t, type: 'triangle', f0: f, f1: f * 2, dur: 0.14, vol: 0.22, exp: true });
   };
 
+
+  /* 結晶。連続で取るので短く、取るたび少し上がる */
+  Sound.prototype.coin = function (n) {
+    if (!this.ctx) return;
+    var t = this._now();
+    var k = Math.min(8, Math.max(1, n || 1));
+    var f = 880 * Math.pow(1.0595, (k - 1) * 2);
+    this._tone({ at: t, type: 'triangle', f0: f, dur: 0.07, vol: 0.11 });
+    this._tone({ at: t + 0.035, type: 'triangle', f0: f * 1.5, dur: 0.09, vol: 0.09 });
+  };
+
+  /* ご褒美の間に入った。ここだけは派手にする */
+  Sound.prototype.reward = function () {
+    if (!this.ctx) return;
+    var t = this._now();
+    [523, 659, 784, 1046, 1318].forEach(function (f, i) {
+      this._tone({ at: t + i * 0.07, type: 'triangle', f0: f, dur: 0.42, vol: 0.15 });
+      this._tone({ at: t + i * 0.07, type: 'square', f0: f * 2, dur: 0.16, vol: 0.05 });
+    }, this);
+    this._tone({ at: t + 0.35, type: 'sine', f0: 130, f1: 65, dur: 0.7, vol: 0.22, exp: true });
+    this._noiseBurst({ at: t, filter: 'highpass', fStart: 1200, fEnd: 6000, dur: 0.5, vol: 0.07 });
+  };
 
   Sound.prototype.pickup = function () {
     if (!this.ctx) return;
@@ -1321,6 +1416,108 @@ BM.DIRS = [
     this.lastType = '';
     this.t = 0;
     this.deepest = 0;
+    // ご褒美の間。mileDone は「何個目の節目まで置いたか」
+    this.mileDone = 0;
+    this.rewardLeft = 0;
+    this.rewardKind = null;
+    this.rewardHead = false;
+    this.rewardPlan = [];
+  };
+
+  /* 節目の中身。深さ（=節目の番号）だけで決まるようにしておく。
+     乱数で選ぶと、同じ深度を検査しても毎回違う結果になって確かめられない。 */
+  World.prototype.rewardAt = function (mile) {
+    if (mile % BM.BIG_EVERY === 0) return BM.REWARD_BIG;
+    // 大空洞が挟まると番号がずれて、特定の種類だけ出にくくなる。
+    // 大空洞のぶんを引いてから巡回させると4種が均等に回る。
+    var i = mile - Math.floor(mile / BM.BIG_EVERY);
+    return BM.REWARDS[(i - 1) % BM.REWARDS.length];
+  };
+
+  /* ご褒美の間に浮かべるものを、空間全体に配置してから配る。
+     結晶は落ちながら回収するものなので、蛇行する線に並べる。
+     取り逃しても損は無い（＝任意の寄り道）ようにしてある。 */
+  World.prototype.planReward = function (kind, row0, spanRows, cfg) {
+    var plan = [], mid = Math.round((L + R) / 2), i;
+    var list = kind.items || [];
+    for (i = 0; i < list.length; i++) {
+      // 入口の直後に置くと、そこへ横移動する時間が無くて取れない。
+      // 確定で渡すつもりの物なので、間を空けて中央寄りに置く。
+      plan.push({
+        type: list[i],
+        col: BM.clamp(mid + Math.round((i - (list.length - 1) / 2) * 2), L + 1, R - 1),
+        row: row0 + 6 + i * 4
+      });
+    }
+    var n = kind.coins || 0;
+    if (n > 0) {
+      var top = row0 + 8 + list.length * 4;
+      var step = Math.max(2, Math.floor((spanRows - (top - row0) - 2) / n));
+      // 蛇行の幅は「次の結晶までに横へ動ける距離」で決める。
+      // 固定値にすると、深いところでは結晶の列が自分より速く逃げて、
+      // 1個も取れない飾りになる。
+      // 角度から計算するだけでは列を整数に丸めた時にはみ出すので、
+      // 並べたあとに隣との差を実際に詰めて必ず追えるようにする。
+      var amp = 4;
+      var perStep = cfg.moveSpeed * (step * TILE / cfg.vTerm) / TILE;
+      var maxStep = Math.max(1, Math.floor(perStep * 0.75));
+      var dphase = Math.min(0.62, (perStep * 0.7) / amp);
+      var prev = null;
+      for (i = 0; i < n; i++) {
+        var col = mid + Math.round(Math.sin(i * dphase) * amp);
+        if (prev !== null) col = BM.clamp(col, prev - maxStep, prev + maxStep);
+        col = BM.clamp(col, L + 1, R - 1);
+        prev = col;
+        plan.push({ type: 'COIN', col: col, row: top + i * step });
+      }
+    }
+    return plan;
+  };
+
+  /* ご褒美の間の1枚。全マス空なので、ここでは絶対に死なない。 */
+  World.prototype.pushReward = function (rows, cfg) {
+    var spacing = cfg.spacing;
+    var layer = {
+      row: rows, type: 'reward', t: 0, phase: 0,
+      cells: newCells(BM.T_EMPTY),
+      gapX: Math.round((L + R) / 2),
+      button: null, dynamic: false, hint: '',
+      items: [], passed: false,
+      // 全マス空なので出口は縦坑の全幅。どこに居るかは決まらないので exitFree は立てない
+      exit: [L, R], exitFree: false,
+      kind: this.rewardKind, reward: null
+    };
+    if (this.rewardHead) {
+      this.rewardHead = false;
+      layer.reward = {
+        kind: this.rewardKind,
+        mile: this.mileDone,
+        depth: this.mileDone * BM.MILESTONE_ROWS,
+        // 節目ごとに増えるが、増え続けると点が壊れるので上限を置く
+        bonus: BM.MILESTONE_BONUS * Math.min(this.mileDone, BM.MILESTONE_BONUS_CAP)
+      };
+    }
+    // 自分の担当区間にあるものだけ持つ。全部を先頭の層に持たせると、
+    // 画面外へ流れて層が捨てられた時に、まだ下にある結晶まで消える。
+    var keep = [], i;
+    for (i = 0; i < this.rewardPlan.length; i++) {
+      var e = this.rewardPlan[i];
+      if (e.row >= rows && (this.rewardLeft > 1 ? e.row < rows + spacing : true)) {
+        layer.items.push({ col: e.col, row: e.row, type: e.type, t: 0, alive: true });
+      } else keep.push(e);
+    }
+    this.rewardPlan = keep;
+    this.rewardLeft--;
+
+    this.layers.push(layer);
+    this.byRow[rows] = layer;
+    // どの列に居るかは決まらないので、次の穴は「両端から届く位置」に限る
+    this.exit = { lo: L, hi: R };
+    this.exitFree = false;
+    this.lastType = 'reward';
+    this.lastRow = rows;
+    this.nextRow = rows + spacing;
+    this.deepest = rows;
   };
 
   /* 横移動の速さも深度で上げる。落下だけ速くすると比率が壊れる。 */
@@ -1362,6 +1559,23 @@ BM.DIRS = [
       var cfg = this.difficulty(rows);
       cfg.vTerm = this.vTerm(rows);
       cfg.moveSpeed = this.moveSpeed(rows);
+      /* ---- 200m ごとのご褒美の間（底なし＝深さに終わりが無いので巡回する） ----
+         やっているのは「岩を置かないこと」だけ。層自体は普通に置くので、
+         到達可能性も可視性も自動的に満たされる。ここを特別扱いして
+         層を飛ばすと、その区間だけ不変条件の外に出てしまう。 */
+      var mile = Math.floor(rows / BM.MILESTONE_ROWS);
+      if (this.rewardLeft <= 0 && mile > this.mileDone && !this.debugType) {
+        this.mileDone = mile;
+        this.rewardKind = this.rewardAt(mile);
+        this.rewardLeft = (mile % BM.BIG_EVERY === 0) ? BM.BIG_SPAN : BM.REWARD_SPAN;
+        this.rewardHead = true;
+        this.rewardPlan = this.planReward(this.rewardKind, rows, this.rewardLeft * cfg.spacing, cfg);
+      }
+      if (this.rewardLeft > 0) {
+        this.pushReward(rows, cfg);
+        continue;
+      }
+
       // debugType はテスト専用。1種類の地層だけを並べて通れるか確かめるのに使う
       var type = this.debugType || pickType(rows, this.lastType);
 
@@ -1394,7 +1608,7 @@ BM.DIRS = [
         button: null,
         dynamic: false,
         hint: '',
-        item: null,
+        items: [],
         passed: false
       };
 
@@ -1452,13 +1666,13 @@ BM.DIRS = [
       // ときどきアイテムを浮かべる
       if (Math.random() < 0.3) {
         var pool = ['BOMB', 'BOMB', 'POWER', 'SHIELD', 'SLOW'];
-        layer.item = {
+        layer.items.push({
           col: BM.clamp(layer.gapX + BM.randInt(-1, 1), L, R),
           row: layer.row - BM.randInt(2, 4),
           type: BM.pick(pool),
           t: 0,
           alive: true
-        };
+        });
       }
 
       this.layers.push(layer);
@@ -2017,6 +2231,8 @@ BM.DIRS = [
     this.deathLog = [];
     this.passedCount = 0;
     this.speedMul = 1;
+    this.coinRun = 0; this.coinRunT = 0;
+    this.reward = null;
     this.bgDust = [];
     for (var i = 0; i < 46; i++) {
       this.bgDust.push({ x: Math.random() * W, y: Math.random() * H, r: BM.rand(0.6, 2.2), s: BM.rand(0.15, 0.7) });
@@ -2041,6 +2257,8 @@ BM.DIRS = [
     this.zoneIndex = 0;
     this.deathLog = [];
     this.passedCount = 0;
+    this.coinRun = 0; this.coinRunT = 0;
+    this.reward = null;
     this.camY = this.player.y - H * 0.34;
     this.world.ensure(BM.rowOf(this.camY) + BM.VIEW_ROWS + 24);
     this.state = BM.S_PLAY;
@@ -2056,6 +2274,9 @@ BM.DIRS = [
     if (this.hitStop > 0) { this.hitStop -= dt; dt *= 0.2; }
     this.stateT += dt;
     if (this.chainT > 0) { this.chainT -= dt; if (this.chainT <= 0) this.chain = 0; }
+    // 結晶を続けて取ると倍率が上がる。少し離れると切れる
+    if (this.coinRunT > 0) { this.coinRunT -= dt; if (this.coinRunT <= 0) this.coinRun = 0; }
+    if (this.reward) { this.reward.t += dt; if (this.reward.t > 2.6) this.reward = null; }
 
     if (BM.autopilot.enabled) BM.autopilot.step(this);
 
@@ -2325,24 +2546,58 @@ BM.DIRS = [
   Game.prototype.checkItems = function () {
     var p = this.player;
     for (var i = 0; i < this.world.layers.length; i++) {
-      var it = this.world.layers[i].item;
-      if (!it || !it.alive) continue;
-      var ix = BM.centerX(it.col), iy = BM.centerY(it.row);
-      if (Math.abs(p.x - ix) < p.r + 14 && Math.abs(p.y - iy) < p.r + 14) {
+      var list = this.world.layers[i].items;
+      if (!list) continue;
+      for (var k = 0; k < list.length; k++) {
+        var it = list[k];
+        if (!it.alive) continue;
+        var ix = BM.centerX(it.col), iy = BM.centerY(it.row);
+        if (Math.abs(p.x - ix) >= p.r + 14 || Math.abs(p.y - iy) >= p.r + 14) continue;
         it.alive = false;
         var def = BM.ITEMS[it.type];
         switch (it.type) {
           case 'BOMB':   p.bombs = Math.min(BM.MAX_BOMBS, p.bombs + 1); break;
           case 'POWER':  p.power = Math.min(BM.MAX_POWER, p.power + 1); break;
-          case 'SHIELD': p.shield = Math.min(3, p.shield + 1); break;
+          case 'SHIELD': p.shield = Math.min(BM.SHIELD_MAX, p.shield + 1); break;
           case 'SLOW':   p.slow = 3.5; break;
+          // 結晶は取るほど連なって点が伸びる。落ちながらの寄り道の見返り
+          case 'COIN':
+            this.coinRun = (this.coinRun || 0) + 1;
+            this.coinRunT = 1.2;
+            break;
         }
-        this.score += 100;
-        this.fx.text(ix, iy - 14, def.label, def.color, 15);
+        if (it.type === 'COIN') {
+          var v = BM.COIN_SCORE * Math.min(5, this.coinRun);
+          this.score += v;
+          this.fx.text(ix, iy - 14, '+' + v + (this.coinRun > 1 ? ' ×' + Math.min(5, this.coinRun) : ''),
+                       def.color, 15);
+          BM.sound.coin(this.coinRun);
+        } else {
+          this.score += 100;
+          this.fx.text(ix, iy - 14, def.label, def.color, 15);
+          BM.sound.pickup();
+        }
         this.fx.sparkle(ix, iy, def.color);
-        BM.sound.pickup();
       }
     }
+  };
+
+  /* ご褒美の間に入った時。ここで確実に何かが増える。
+     深く潜っても景色しか変わらないと、深度そのものが目的にならない。 */
+  Game.prototype.grantReward = function (r) {
+    var p = this.player, k = r.kind, got = [];
+    if (k.bombsFull && p.bombs < BM.MAX_BOMBS) { p.bombs = BM.MAX_BOMBS; got.push('爆弾 満タン'); }
+    if (k.bombs) { p.bombs = Math.min(BM.MAX_BOMBS, p.bombs + k.bombs); got.push('爆弾 +' + k.bombs); }
+    if (k.shield) { p.shield = Math.min(BM.SHIELD_MAX, p.shield + k.shield); got.push('シールド +' + k.shield); }
+    if (k.slow) { p.slow = k.slow; got.push('スロー ' + k.slow + '秒'); }
+    this.score += r.bonus;
+    this.reward = { kind: k, t: 0, depth: r.depth, bonus: r.bonus };
+    this.fx.addFlash(0.3, '255,224,120');
+    this.fx.addShake(4);
+    // バナーは出さない。ご褒美の内容はトーストが全部書くので、
+    // 同じ文字が2枚重なって両方読めなくなる（100m ごとの地層バナーとも被る）
+    BM.ui.reward(r.depth, k, r.bonus, got);
+    BM.sound.reward();
   };
 
   Game.prototype.checkPassed = function () {
@@ -2353,6 +2608,7 @@ BM.DIRS = [
       if (p.y > (l.row + 1) * TILE) {
         l.passed = true;
         this.passedCount++;
+        if (l.reward) { this.grantReward(l.reward); continue; }
         this.score += 50;
         // ぎりぎりを抜けたら褒める
         var col = BM.colOf(p.x);
@@ -2389,6 +2645,7 @@ BM.DIRS = [
     this.fx.drawBelow(g);
     this.drawWalls(g, z);
     this.drawLayers(g, z);
+    this.drawRewardBands(g);
     this.drawItems(g);
     this.drawButtons(g);
     this.drawBombs(g);
@@ -2618,24 +2875,79 @@ BM.DIRS = [
 
   Game.prototype.drawItems = function (g) {
     for (var i = 0; i < this.world.layers.length; i++) {
-      var it = this.world.layers[i].item;
-      if (!it || !it.alive) continue;
-      var def = BM.ITEMS[it.type];
-      var x = BM.centerX(it.col), y = BM.centerY(it.row) + Math.sin(this.world.t * 3 + it.col) * 4;
+      var list = this.world.layers[i].items;
+      if (!list) continue;
+      for (var k = 0; k < list.length; k++) {
+        var it = list[k];
+        if (!it.alive) continue;
+        var def = BM.ITEMS[it.type];
+        var x = BM.centerX(it.col), y = BM.centerY(it.row) + Math.sin(this.world.t * 3 + it.col) * 4;
+        g.save();
+        g.translate(x, y);
+        if (it.type === 'COIN') {
+          // 結晶は小さく軽く。数が多いので四角い枠は付けない
+          g.rotate(this.world.t * 2.2 + it.col);
+          g.globalCompositeOperation = 'lighter';
+          var cg = g.createRadialGradient(0, 0, 1, 0, 0, 16);
+          cg.addColorStop(0, hexA(def.color, 0.55));
+          cg.addColorStop(1, hexA(def.color, 0));
+          g.fillStyle = cg;
+          g.beginPath(); g.arc(0, 0, 16, 0, 6.3); g.fill();
+          g.globalCompositeOperation = 'source-over';
+          g.fillStyle = def.color;
+          g.beginPath();
+          g.moveTo(0, -8); g.lineTo(6, 0); g.lineTo(0, 8); g.lineTo(-6, 0);
+          g.closePath(); g.fill();
+          g.fillStyle = 'rgba(255,255,255,.75)';
+          g.beginPath(); g.moveTo(0, -8); g.lineTo(3, -2); g.lineTo(0, 1); g.lineTo(-3, -2);
+          g.closePath(); g.fill();
+          g.restore();
+          continue;
+        }
+        g.globalCompositeOperation = 'lighter';
+        var gr = g.createRadialGradient(0, 0, 2, 0, 0, 24);
+        gr.addColorStop(0, hexA(def.color, 0.5));
+        gr.addColorStop(1, hexA(def.color, 0));
+        g.fillStyle = gr;
+        g.beginPath(); g.arc(0, 0, 24, 0, 6.3); g.fill();
+        g.globalCompositeOperation = 'source-over';
+        g.beginPath(); BM.roundRect(g, -13, -13, 26, 26, 8); g.fillStyle = 'rgba(16,10,28,.92)'; g.fill();
+        g.strokeStyle = def.color; g.lineWidth = 2; g.stroke();
+        g.font = '15px system-ui, sans-serif';
+        g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.fillText(def.glyph, 0, 1);
+        g.restore();
+      }
+    }
+  };
+
+  /* ご褒美の間の見た目。岩が無いだけだと「生成が抜けた」ようにも見えるので、
+     入口に光る帯と名前を出して、意図してある空間だと分かるようにする。 */
+  Game.prototype.drawRewardBands = function (g) {
+    for (var i = 0; i < this.world.layers.length; i++) {
+      var l = this.world.layers[i];
+      if (l.type !== 'reward' || !l.reward) continue;
+      var y = l.row * TILE, c = l.kind.color;
       g.save();
-      g.translate(x, y);
-      g.globalCompositeOperation = 'lighter';
-      var gr = g.createRadialGradient(0, 0, 2, 0, 0, 24);
-      gr.addColorStop(0, hexA(def.color, 0.5));
-      gr.addColorStop(1, hexA(def.color, 0));
+      var gr = g.createLinearGradient(0, y - 26, 0, y + 26);
+      gr.addColorStop(0, hexA(c, 0));
+      gr.addColorStop(0.5, hexA(c, 0.5));
+      gr.addColorStop(1, hexA(c, 0));
       g.fillStyle = gr;
-      g.beginPath(); g.arc(0, 0, 24, 0, 6.3); g.fill();
-      g.globalCompositeOperation = 'source-over';
-      g.beginPath(); BM.roundRect(g, -13, -13, 26, 26, 8); g.fillStyle = 'rgba(16,10,28,.92)'; g.fill();
-      g.strokeStyle = def.color; g.lineWidth = 2; g.stroke();
-      g.font = '15px system-ui, sans-serif';
-      g.textAlign = 'center'; g.textBaseline = 'middle';
-      g.fillText(def.glyph, 0, 1);
+      g.fillRect(L * TILE, y - 26, (R - L + 1) * TILE, 52);
+      g.strokeStyle = hexA(c, 0.9); g.lineWidth = 2;
+      g.beginPath(); g.moveTo(L * TILE, y); g.lineTo((R + 1) * TILE, y); g.stroke();
+      // 文字は左寄せ。中央に置くと、入った直後に出る中央のトーストと
+      // 帯が上へ流れる途中で必ず重なって、両方読めなくなる。
+      var tx = L * TILE + 10;
+      g.fillStyle = hexA(c, 0.95);
+      g.font = '900 15px system-ui, sans-serif';
+      g.textAlign = 'left'; g.textBaseline = 'bottom';
+      g.fillText(l.reward.depth + 'm  ' + l.kind.name, tx, y - 7);
+      g.font = '600 10px system-ui, sans-serif';
+      g.textBaseline = 'top';
+      g.fillStyle = hexA(c, 0.7);
+      g.fillText(l.kind.desc + '   +' + l.reward.bonus, tx, y + 7);
       g.restore();
     }
   };
@@ -2965,8 +3277,36 @@ BM.DIRS = [
         g.fillText(m + 'm', W - 15, y + 3);
       }
     }
+    this.drawNextReward(g);
     g.restore();
     void x;
+  };
+
+  /* 次のご褒美までの残り。次に何が待っているかが見えていないと、
+     ただ落ちているだけになる。深さに終わりが無いので、
+     目標は常に「次の節目」になる。 */
+  Game.prototype.drawNextReward = function (g) {
+    var d = this.player.deepest;
+    var mile = Math.floor(d / BM.MILESTONE_ROWS) + 1;
+    var next = mile * BM.MILESTONE_ROWS;
+    var kind = this.world.rewardAt(mile);
+    var left = next - d;
+    var near = left <= 40;
+    g.save();
+    g.textAlign = 'right';
+    g.font = '800 11px system-ui, sans-serif';
+    g.fillStyle = hexA(kind.color, near ? 0.95 : 0.6);
+    g.fillText('次 ' + next + 'm  ' + kind.name, W - 16, 16);
+    g.font = '700 10px system-ui, sans-serif';
+    g.fillStyle = 'rgba(255,255,255,' + (near ? 0.8 : 0.42) + ')';
+    g.fillText('あと ' + left + 'm', W - 16, 30);
+    // 残りをそのまま帯にする
+    var frac = 1 - left / BM.MILESTONE_ROWS;
+    g.fillStyle = 'rgba(255,255,255,.12)';
+    g.fillRect(W - 96, 36, 80, 3);
+    g.fillStyle = hexA(kind.color, near ? 0.95 : 0.55);
+    g.fillRect(W - 96, 36, 80 * BM.clamp(frac, 0, 1), 3);
+    g.restore();
   };
 
   /* 構造確認モードの状態表示。
@@ -3104,6 +3444,7 @@ BM.DIRS = [
         el.shieldPips.appendChild(sp);
       }
       el.banner = document.getElementById('combo-banner');
+      el.rewardToast = document.getElementById('reward-toast');
     },
     hide: function () { BM.ads.cancel(); el.overlay.classList.add('hidden'); },
     show: function (html) { el.panel.innerHTML = html; el.overlay.classList.remove('hidden'); },
@@ -3114,6 +3455,24 @@ BM.DIRS = [
       void el.banner.offsetWidth;
       el.banner.classList.add('show');
     },
+    /* ご褒美の間。何をもらったのかを文字で出す。
+       演出だけだと「光ったけど何が起きた?」で終わる。 */
+    reward: function (depth, kind, bonus, got) {
+      var n = el.rewardToast;
+      if (!n) return;
+      n.style.setProperty('--rw', kind.color);
+      n.innerHTML =
+        '<div class="rw-depth">' + depth + 'm 到達</div>' +
+        '<div class="rw-name">' + kind.name + '</div>' +
+        (got && got.length
+          ? '<div class="rw-got">' + got.map(function (t) { return '<span>' + t + '</span>'; }).join('') + '</div>'
+          : '<div class="rw-got"><span>' + kind.desc + '</span></div>') +
+        '<div class="rw-bonus">+' + bonus.toLocaleString('en-US') + '</div>';
+      n.classList.remove('show');
+      void n.offsetWidth;
+      n.classList.add('show');
+    },
+
     bump: function (node) { node.classList.remove('bump'); void node.offsetWidth; node.classList.add('bump'); },
 
     _d: -1, _s: -1, _b: -1, _sh: -1,
@@ -3184,6 +3543,11 @@ BM.DIRS = [
         '画面右上の丸が残数。<b style="color:#ff8a6a">0になると赤く点滅し、押しても空振りする</b>ので、<br>' +
         'どの層で使うかを決めてから落とすこと。💣 のアイテムで1個補充できる。</p>' +
         '<p>100m ごとに地層が変わり、落下速度も層の間隔も上がっていく。</p>' +
+        '<p><b style="color:#ffe066">200m ごとに「ご褒美の間」がある。</b>' +
+        'その区間だけ岩が無く、爆弾の補給・シールド・爆風アップ・結晶（💠 点数）が' +
+        '待っている。中身は4種を巡回し、<b>1000m ごとは全部盛りの大空洞</b>。<br>' +
+        '画面右上に次の節目と残り距離が出ている。<b>深さに終わりは無い</b>ので、' +
+        '目標は常に次の節目。</p>' +
         '</div>' +
         '<div class="menu"><button data-act="back">◀ もどる</button></div>'
       );

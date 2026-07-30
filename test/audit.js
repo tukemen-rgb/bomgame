@@ -52,8 +52,13 @@ function auditWorld(maxRow) {
   const L = BM.PLAY_L, R = BM.PLAY_R, TILE = BM.TILE;
   const reachTiles = (rows, vt, ms) => (ms * (rows * TILE / vt) * BM.REACH_MARGIN) / TILE;
 
-  const fail = { reach: [], blocked: [], tooFast: [], narrow: [], offscreen: [], button: [] };
+  const fail = { reach: [], blocked: [], tooFast: [], narrow: [], offscreen: [], button: [], mile: [] };
   let layers = 0, byType = {};
+  // ご褒美の間（200m ごと）。1つでも欠けると、そこから先は潜る理由が無くなる
+  const mileSeen = {}, mileKind = {};
+  let rewardOpen = 0, rewardLayers = 0, coinPairs = 0, coinTooFar = 0;
+  let giftN = 0, giftUnreachable = 0;
+  let entry = null;   // ご褒美の間に入る直前の出口。確定アイテムはここから届かないと意味がない
 
   const w = new BM.World();
   w.reset();
@@ -156,12 +161,55 @@ function auditWorld(maxRow) {
         }
       }
 
+      // --- 6. 200m ごとのご褒美の間 ---
+      if (l.type === 'reward') {
+        rewardLayers++;
+        let open = true;
+        for (let c = L; c <= R; c++) if (l.cells[c] !== BM.T_EMPTY) open = false;
+        if (open) rewardOpen++;
+        else if (fail.mile.length < 5) fail.mile.push({ what: '空でない', row: l.row });
+        // 結晶が落ちながら追える間隔に並んでいるか
+        const coins = l.items.filter(it => it.type === 'COIN').sort((a, b) => a.row - b.row);
+        for (let i = 1; i < coins.length; i++) {
+          const drow = coins[i].row - coins[i - 1].row;
+          const cr = ms * (drow * TILE / vt) / TILE;
+          coinPairs++;
+          if (Math.abs(coins[i].col - coins[i - 1].col) > cr) {
+            coinTooFar++;
+            if (fail.mile.length < 5) fail.mile.push({ what: '結晶が届かない', row: l.row });
+          }
+        }
+        if (l.reward) {
+          mileSeen[l.reward.mile] = l.reward.depth;
+          mileKind[l.kind.key] = (mileKind[l.kind.key] || 0) + 1;
+          entry = { lo: prevExit.lo, hi: prevExit.hi, row: prevExit.row };
+        }
+        // 確定で渡すつもりのアイテムが、入口から横移動で届く位置にあるか。
+        // 届かない場所に置いた「確定」は、ただの飾りになる。
+        if (entry) {
+          l.items.filter(it => it.type !== 'COIN').forEach(it => {
+            giftN++;
+            const gr = reachTiles(it.row - entry.row, vt, ms);
+            const worst = Math.max(Math.abs(it.col - entry.lo), Math.abs(it.col - entry.hi));
+            if (worst > gr) {
+              giftUnreachable++;
+              if (fail.mile.length < 5) fail.mile.push({ what: '確定アイテムに届かない', row: l.row, col: it.col, worst, gr: +gr.toFixed(2) });
+            }
+          });
+        }
+      }
+
       prevExit = { lo, hi, free: !!l.exitFree, row: l.row, type: l.type };
     }
     // 検査済みを捨てる
     w.prune(base + CHUNK - 4);
   }
-  return { layers, byType, fail };
+  // 節目の欠け。最後の1つは生成が途中で切れている可能性があるので見ない
+  const mn = Object.keys(mileSeen).map(Number).sort((a, b) => a - b);
+  const missing = [];
+  for (let m = mn[0]; m < mn[mn.length - 1]; m++) if (!mileSeen[m]) missing.push(m * BM.MILESTONE_ROWS);
+  return { layers, byType, fail, milestones: mn.length, missing,
+           mileKind, rewardOpen, rewardLayers, coinPairs, coinTooFar, giftN, giftUnreachable };
 }
 
 (async () => {
@@ -229,6 +277,15 @@ function auditWorld(maxRow) {
     res.fail.offscreen.length ? JSON.stringify(res.fail.offscreen[0]) : '');
   check('ボタンに届き、押したあと穴にも届く', res.fail.button.length === 0,
     res.fail.button.length ? JSON.stringify(res.fail.button[0]) : '');
+  line(`  ご褒美の間: ${res.milestones.toLocaleString('en-US')} 個 / 開いた層 ${res.rewardOpen}/${res.rewardLayers}` +
+       ` / 結晶の並び ${res.coinPairs.toLocaleString('en-US')} 組`);
+  line('  中身の回り方: ' + JSON.stringify(res.mileKind));
+  check(`200m ごとのご褒美が1つも欠けない（欠け ${res.missing.length} 個）`, res.missing.length === 0,
+    res.missing.length ? res.missing.slice(0, 5).join('m, ') + 'm' : '');
+  check('ご褒美の間は全マス空（そこでは死なない）', res.rewardOpen === res.rewardLayers);
+  check(`結晶は落ちながら追える間隔（届かない ${res.coinTooFar} 組）`, res.coinTooFar === 0);
+  check(`確定アイテムは入口から届く（${res.giftN.toLocaleString('en-US')} 個中 ${res.giftUnreachable} 個が届かない）`,
+    res.giftUnreachable === 0, res.fail.mile.length ? JSON.stringify(res.fail.mile[0]) : '');
 
   /* ===== 3. 実プレイ検査：無敵で長時間潜る ===== */
   const PLAY_SEC = 120;
