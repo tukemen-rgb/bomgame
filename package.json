@@ -6,6 +6,7 @@
   "scripts": {
     "start": "python3 -m http.server 8901",
     "test": "node test/smoke.js",
+    "mobile": "node test/mobile.js",
     "audit": "node test/audit.js",
     "bundle": "node tools/bundle.js"
   },

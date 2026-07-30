@@ -78,7 +78,13 @@
       el.rewardToast = document.getElementById('reward-toast');
     },
     hide: function () { BM.ads.cancel(); el.overlay.classList.add('hidden'); },
-    show: function (html) { el.panel.innerHTML = html; el.overlay.classList.remove('hidden'); },
+    show: function (html) {
+      // 端末チェックが張った専用の見た目と click を必ず落としてから描き替える
+      el.panel.classList.remove('dev');
+      el.panel.onclick = null;
+      el.panel.innerHTML = html;
+      el.overlay.classList.remove('hidden');
+    },
 
     banner: function (text) {
       el.banner.textContent = text;
@@ -155,6 +161,7 @@
         '<div class="menu">' +
         '<button data-act="play">▶ 落ちる</button>' +
         '<button data-act="how">📖 あそびかた</button>' +
+        '<button data-act="device">📱 端末チェック</button>' +
         '</div>' +
         '<div class="tips">最高到達 <b>' + g.bestDepth + 'm</b> ／ ハイスコア <b>' +
         g.bestScore.toLocaleString('en-US') + '</b></div>'
@@ -263,6 +270,7 @@
         ui.showTitle(game);
         break;
       case 'how': ui.showHow(); break;
+      case 'device': BM.devicecheck.open(); break;
       case 'back': ui.showTitle(game); break;
     }
   }
@@ -339,6 +347,25 @@
     requestAnimationFrame(frame);
   }
 
+  /* 横持ちで画面が覆われている間は止める。
+     案内を出しているのに裏で落ち続けていると、見えないまま墜落する。
+     縦に戻した時は自動で再開しない（ポーズ画面から自分で戻す）。
+     持ち替えている最中に勝手に動き出すと、その一瞬で死ぬ。 */
+  function watchOrientation() {
+    var mq;
+    try {
+      mq = window.matchMedia('(hover:none) and (pointer:coarse) and (orientation:landscape) and (max-height:480px)');
+    } catch (e) { return; }
+    var onChange = function () {
+      if (!mq.matches || !game) return;
+      if (game.state === BM.S_PLAY) { game.state = BM.S_PAUSE; ui.showPause(); }
+    };
+    if (mq.addEventListener) mq.addEventListener('change', onChange);
+    else if (mq.addListener) mq.addListener(onChange);
+    BM.isCovered = function () { return !!mq.matches; };
+    onChange();
+  }
+
   window.addEventListener('load', function () {
     // 演出を抑えるかどうかは、何かを描く前に決めておく
     BM.a11y.apply();
@@ -351,9 +378,12 @@
     if (/[?&]inspect=1/.test(location.search)) game.noDeath = true;
     // ?noads=1 で広告を止める（テストや動作確認用）
     if (/[?&]noads=1/.test(location.search)) BM.ads.enabled = false;
+    // ?device=1 … 端末チェックを直接開く（実機に URL を渡す時に使う）
+    if (/[?&]device=1/.test(location.search)) setTimeout(function () { BM.devicecheck.open(); }, 0);
     // ?reduce=1 / ?reduce=0 … 演出の抑制を明示する（検査用。保存もされる）
     var rm = /[?&]reduce=([01])/.exec(location.search);
     if (rm) BM.a11y.set(rm[1] === '1');
+    watchOrientation();
     ui.showTitle(game);
     requestAnimationFrame(frame);
   });

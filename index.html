@@ -63,6 +63,16 @@
 
 </div>
 
+<!-- 横持ちの端末向け。低い画面には縦坑が入らないので、素直に縦にしてもらう。
+     覆っている間はゲームを止める（見えないまま落ちて死ぬのが一番まずい）。 -->
+<div id="rotate" role="alertdialog" aria-live="polite">
+  <div class="rot-box">
+    <div class="rot-icon">📱</div>
+    <div class="rot-title">画面を縦にしてください</div>
+    <div class="rot-sub">横持ちだと縦坑が画面に入りません。<br>縦に戻すと続きから再開できます。</div>
+  </div>
+</div>
+
 <script src="js/const.js"></script>
 <script src="js/audio.js"></script>
 <script src="js/fx.js"></script>
@@ -70,6 +80,7 @@
 <script src="js/entities.js"></script>
 <script src="js/autopilot.js"></script>
 <script src="js/ads.js"></script>
+<script src="js/devicecheck.js"></script>
 <script src="js/game.js"></script>
 <script src="js/main.js"></script>
 </body>

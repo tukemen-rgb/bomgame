@@ -353,7 +353,6 @@ canvas#game{
 }
 .tbtn.big{width:76px;height:76px;font-size:30px;border-color:var(--hot)}
 .tbtn:active{background:#3d2a63;transform:scale(.94)}
-@media (hover:none) and (pointer:coarse){ #touch{display:flex} #legend{display:none} }
 
 /* ---------- legend ---------- */
 #legend{
@@ -361,6 +360,38 @@ canvas#game{
   font-size:11px;color:var(--dim);
 }
 #legend b{color:#ffe9a8;font-weight:700}
+
+/* 指で触る端末では、操作ボタンを出してキーの凡例を隠す。
+   この指定は #legend / #touch の定義より後に置かないと効かない
+   （同じ詳細度なので、後に書いたほうが勝つ）。
+   実際、以前はこれが #legend の定義より前にあり、スマホでキーの凡例が
+   出たままになっていた。狭い画面で縦を食うので、ただの害だった。 */
+@media (hover:none) and (pointer:coarse){
+  #touch{display:flex}
+  #legend{display:none}
+}
+
+/* ---------- 横持ちの案内 ----------
+   縦坑は縦に長いので、低い画面には物理的に入らない。
+   横持ちの実機（高さ 480px 以下）では 520px 幅の盤面が 555px の高さになり、
+   スクロールしないと下が見えない。見えないまま落ちるのが一番まずいので、
+   小さく縮めるのではなく縦に持ち替えてもらう。 */
+#rotate{display:none}
+@media (hover:none) and (pointer:coarse) and (orientation:landscape) and (max-height:480px){
+  #rotate{
+    display:flex;
+    position:fixed;inset:0;z-index:50;
+    align-items:center;justify-content:center;
+    background:rgba(8,5,15,.94);
+    backdrop-filter:blur(4px);
+    text-align:center;
+  }
+  .rot-box{padding:18px 22px}
+  .rot-icon{font-size:40px;transform:rotate(90deg);line-height:1.2}
+  .rot-title{font-size:19px;font-weight:800;margin-top:10px;color:var(--hot2)}
+  .rot-sub{font-size:12.5px;line-height:1.7;color:var(--dim);margin-top:8px}
+}
+.reduce-motion .rot-icon{transform:none}
 
 /* ---------- 演出を抑える設定 ----------
    クラスは JS（BM.a11y）が付ける。OS の prefers-reduced-motion を既定にしつつ、
@@ -389,6 +420,69 @@ canvas#game{
 .reduce-motion .hud-shield.fire .pips{ animation:none; transform:none; filter:none }
 .reduce-motion .menu button:active{ transform:none }
 .reduce-motion .ad-creative{ transition:none }
+
+/* ---------- 端末チェック ----------
+   実機の狭い画面で、指で触って結果を残せることが目的。
+   盤面の中に収まるので、パネル自体をスクロールさせる。 */
+.panel.dev{
+  max-width:96%;
+  max-height:100%;
+  overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
+  padding:14px 14px 18px;
+  text-align:left;
+}
+.dev-wrap{font-size:12px}
+.dev-sec{
+  font-size:10px;font-weight:800;letter-spacing:.12em;
+  color:var(--dim);margin:12px 0 5px;
+}
+.dev-sec small{font-weight:600;letter-spacing:0;opacity:.8}
+.dev-list{display:flex;flex-direction:column;gap:3px}
+.dev-row{
+  display:flex;align-items:center;gap:7px;
+  background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.07);
+  border-radius:8px;padding:5px 8px;
+}
+.dev-mark{
+  flex:0 0 auto;width:16px;text-align:center;
+  font-weight:800;color:var(--dim);
+}
+.dev-mark.ok{color:#8affd0}
+.dev-mark.ng{color:var(--hot)}
+.dev-q{flex:1;line-height:1.4}
+.dev-got{
+  flex:0 0 auto;display:flex;gap:4px;align-items:center;
+  font-size:11px;font-weight:700;color:var(--dim);
+  font-variant-numeric:tabular-nums;
+}
+/* 44px 以上。ゲームの操作ボタンにその基準を課しているのだから、
+   この画面のボタンが小さいのは筋が通らない */
+.dev-btn{
+  font:inherit;font-weight:800;font-size:14px;
+  min-width:44px;min-height:44px;
+  color:var(--ink);
+  background:linear-gradient(180deg,#2a1c45,#1a1130);
+  border:1px solid #402f66;border-radius:8px;
+  cursor:pointer;
+}
+.dev-btn.on{border-color:#8affd0;color:#8affd0}
+.dev-btn.on.ng{border-color:var(--hot);color:var(--hot)}
+.dev-info{
+  font-size:11px;line-height:1.7;color:var(--dim);
+  background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.07);
+  border-radius:8px;padding:7px 9px;
+}
+.dev-ua{font-size:9.5px;opacity:.7;word-break:break-all}
+.dev-note{font-size:11.5px;color:#ffe9a8;margin-top:8px;line-height:1.6}
+.dev-out{
+  width:100%;height:120px;margin-top:6px;
+  font:11px/1.5 ui-monospace,monospace;
+  color:var(--ink);background:#120c20;
+  border:1px solid #402f66;border-radius:8px;padding:6px;
+}
 </style>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><text y='26' font-size='26'>💣</text></svg>">
 </head>
@@ -446,6 +540,16 @@ canvas#game{
     <span><b>P</b> ポーズ / <b>M</b> 音楽 / <b>N</b> 効果音 / <b>R</b> 演出を抑える</span>
   </footer>
 
+</div>
+
+<!-- 横持ちの端末向け。低い画面には縦坑が入らないので、素直に縦にしてもらう。
+     覆っている間はゲームを止める（見えないまま落ちて死ぬのが一番まずい）。 -->
+<div id="rotate" role="alertdialog" aria-live="polite">
+  <div class="rot-box">
+    <div class="rot-icon">📱</div>
+    <div class="rot-title">画面を縦にしてください</div>
+    <div class="rot-sub">横持ちだと縦坑が画面に入りません。<br>縦に戻すと続きから再開できます。</div>
+  </div>
 </div>
 
 <script>
@@ -2320,6 +2424,256 @@ BM.DIRS = [
 </script>
 <script>
 /* =========================================================
+   DEEP FALL — 端末チェック（実機での確認用）
+
+   実機テストで一番困るのは「何が起きたかを持ち帰れないこと」。
+   スマホで触って「なんか変だった」とだけ分かっても直せない。
+   そこでこの画面が、
+
+     ・機械で分かることは自動で判定する（画面サイズ・押す的の寸法・
+       はみ出し・fps・音が鳴る状態か・保存が効くか）
+     ・実機でしか分からないことは、その場で ○ / × を付けられる
+     ・全部まとめてテキストにして、コピーできる
+
+   ようにしてある。コピーしたものをそのまま貼れば報告になる。
+
+   タイトルの「📱 端末チェック」か、URL に ?device=1 で開く。
+   ========================================================= */
+(function (BM) {
+  'use strict';
+
+  // 指で押す的の最小寸法。Apple HIG は 44pt、WCAG 2.5.5 も 44px を目安にしている
+  var MIN_TAP = 44;
+
+  /* 実機でしか分からないこと。ここは人が判定する。
+     「動くかどうか」ではなく「遊べるかどうか」を聞く。 */
+  var MANUAL = [
+    { id: 'thumb',  q: '左右のボタンに親指が自然に届く' },
+    { id: 'aim',    q: '落ちながら狙った隙間へ寄せられる' },
+    { id: 'coin',   q: '結晶（💠）を狙って拾える' },
+    { id: 'bomb',   q: '爆弾ボタンを押し間違えない' },
+    { id: 'read',   q: '岩と隙間が見分けられる（小さすぎない）' },
+    { id: 'hud',    q: '深度・爆弾の残数が読める' },
+    { id: 'sound',  q: '音が出る（マナーモードを解除して）' },
+    { id: 'smooth', q: '動きが引っかからない' },
+    { id: 'hot',    q: '数分遊んでも熱くならない・電池が急に減らない' }
+  ];
+
+  var state = {};   // id -> true / false / null
+  var fps = null;
+
+  function el(id) { return document.getElementById(id); }
+
+  /* 自動で判定できるもの。実機の値をそのまま読む */
+  function auto() {
+    var se = document.scrollingElement;
+    var touch = el('touch');
+    var btns = [].slice.call(document.querySelectorAll('#touch .tbtn')).map(function (b) {
+      var q = b.getBoundingClientRect();
+      return { key: b.getAttribute('data-key'), w: Math.round(q.width), h: Math.round(q.height) };
+    });
+    var minTap = btns.length ? Math.min.apply(null, btns.map(function (b) { return Math.min(b.w, b.h); })) : 0;
+    var labels = [].slice.call(document.querySelectorAll('.hud-label')).map(function (l) {
+      return l.getBoundingClientRect();
+    });
+    var cv = el('game').getBoundingClientRect();
+    var store = (function () {
+      try {
+        window.localStorage.setItem('deepfall.probe', '1');
+        var ok = window.localStorage.getItem('deepfall.probe') === '1';
+        window.localStorage.removeItem('deepfall.probe');
+        return ok;
+      } catch (e) { return false; }
+    })();
+    var ctx = BM.sound && BM.sound.ctx;
+
+    return {
+      view: innerWidth + '×' + innerHeight + ' / dpr ' + (devicePixelRatio || 1),
+      orient: innerWidth > innerHeight ? '横' : '縦',
+      touchPoints: navigator.maxTouchPoints || 0,
+      coarse: matchMedia('(hover:none) and (pointer:coarse)').matches,
+      touchShown: touch ? getComputedStyle(touch).display !== 'none' : false,
+      btns: btns, minTap: minTap,
+      hScroll: se.scrollWidth - se.clientWidth,
+      vScroll: se.scrollHeight - se.clientHeight,
+      labelsVisible: labels.length > 0 && labels.every(function (q) { return q.top >= 0 && q.left >= 0; }),
+      canvas: Math.round(cv.width) + '×' + Math.round(cv.height),
+      covered: typeof BM.isCovered === 'function' ? BM.isCovered() : false,
+      audio: ctx ? ctx.state : '未開始',
+      reduced: BM.a11y.reduced,
+      reducedFrom: BM.a11y.pref() === null ? 'OS の設定' : '手動',
+      store: store,
+      ua: navigator.userAgent
+    };
+  }
+
+  /* 自動判定の合否。実機で壊れていたら困るものだけを ○×する */
+  function verdicts(a) {
+    var v = [];
+    v.push({ ok: a.coarse === a.touchShown, q: '指で触る端末なら操作ボタンが出る',
+             got: a.touchShown ? '出ている' : '出ていない' });
+    if (a.touchShown) {
+      v.push({ ok: a.minTap >= MIN_TAP, q: '押す的が ' + MIN_TAP + 'px 以上',
+               got: '最小 ' + a.minTap + 'px' });
+    }
+    v.push({ ok: a.hScroll <= 0, q: '横スクロールが出ない', got: a.hScroll + 'px' });
+    v.push({ ok: a.covered || a.vScroll <= 0, q: 'スクロールなしで全部入る',
+             got: a.covered ? '横持ち（案内中）' : 'はみ出し ' + a.vScroll + 'px' });
+    v.push({ ok: a.labelsVisible, q: 'HUD のラベルが全部見える', got: a.labelsVisible ? '見える' : '切れている' });
+    v.push({ ok: a.store, q: '記録が保存できる', got: a.store ? '使える' : '使えない' });
+    if (fps != null) {
+      v.push({ ok: fps >= 45, q: '45fps 以上出る', got: fps.toFixed(0) + 'fps' });
+    }
+    return v;
+  }
+
+  function mark(x) { return x === true ? '○' : (x === false ? '×' : '－'); }
+
+  function render() {
+    var a = auto();
+    var v = verdicts(a);
+    var h = '';
+
+    h += '<h2 style="font-size:20px;margin-bottom:2px">📱 端末チェック</h2>';
+    h += '<div class="sub" style="margin-bottom:10px">この結果をコピーして送れば、そのまま報告になります</div>';
+
+    h += '<div class="dev-sec">自動判定</div>';
+    h += '<div class="dev-list">';
+    v.forEach(function (r) {
+      h += '<div class="dev-row"><span class="dev-mark ' + (r.ok ? 'ok' : 'ng') + '">' +
+           (r.ok ? '○' : '×') + '</span><span class="dev-q">' + r.q +
+           '</span><span class="dev-got">' + r.got + '</span></div>';
+    });
+    if (fps == null) {
+      h += '<div class="dev-row"><span class="dev-mark">…</span><span class="dev-q">fps を測る</span>' +
+           '<span class="dev-got"><button class="dev-btn" data-dev="fps">測る</button></span></div>';
+    }
+    h += '</div>';
+
+    h += '<div class="dev-sec">実機で確かめること<small>（触ってから ○ か × を押す）</small></div>';
+    h += '<div class="dev-list">';
+    MANUAL.forEach(function (m) {
+      var s = state[m.id];
+      h += '<div class="dev-row"><span class="dev-mark ' +
+           (s === true ? 'ok' : s === false ? 'ng' : '') + '">' + mark(s) + '</span>' +
+           '<span class="dev-q">' + m.q + '</span>' +
+           '<span class="dev-got">' +
+           '<button class="dev-btn' + (s === true ? ' on' : '') + '" data-dev="y:' + m.id + '">○</button>' +
+           '<button class="dev-btn' + (s === false ? ' on ng' : '') + '" data-dev="n:' + m.id + '">×</button>' +
+           '</span></div>';
+    });
+    h += '</div>';
+
+    h += '<div class="dev-sec">端末</div>';
+    h += '<div class="dev-info">' +
+         '画面 ' + a.view + '（' + a.orient + '）／ゲーム画面 ' + a.canvas + '<br>' +
+         'タッチ点 ' + a.touchPoints + '／音 ' + a.audio +
+         '／演出の抑制 ' + (a.reduced ? 'ON' : 'OFF') + '（' + a.reducedFrom + '）<br>' +
+         '<span class="dev-ua">' + a.ua + '</span></div>';
+
+    h += '<div class="menu" style="margin-top:12px">' +
+         '<button data-dev="copy">📋 結果をコピー</button>' +
+         '<button data-act="title">◀ タイトルへ</button>' +
+         '</div>';
+    h += '<div class="dev-note" id="dev-note"></div>';
+
+    BM.ui.show('<div class="dev-wrap">' + h + '</div>');
+    var panel = el('panel');
+    panel.classList.add('dev');
+    // ボタンは1か所でまとめて受ける（作り直しのたびに付け直さなくて済む）
+    panel.onclick = function (ev) {
+      var b = ev.target.closest ? ev.target.closest('[data-dev]') : null;
+      if (!b) return;
+      var cmd = b.getAttribute('data-dev');
+      b.blur();
+      if (cmd === 'fps') { measureFps(); return; }
+      if (cmd === 'copy') { copyReport(); return; }
+      var m = /^([yn]):(.+)$/.exec(cmd);
+      if (m) {
+        var id = m[2], want = m[1] === 'y';
+        state[id] = (state[id] === want) ? null : want;   // 同じものを押したら取り消し
+        render();
+      }
+    };
+  }
+
+  /* fps はその端末の実測でないと意味がないので、この場で測る */
+  function measureFps() {
+    var note = el('dev-note');
+    if (note) note.textContent = '2秒間 測っています…';
+    var n = 0, t0 = performance.now();
+    (function tick() {
+      n++;
+      var dt = performance.now() - t0;
+      if (dt >= 2000) { fps = n / (dt / 1000); render(); return; }
+      requestAnimationFrame(tick);
+    })();
+  }
+
+  function report() {
+    var a = auto();
+    var v = verdicts(a);
+    var L = [];
+    L.push('DEEP FALL 端末チェック');
+    L.push('画面 ' + a.view + '（' + a.orient + '）/ ゲーム画面 ' + a.canvas);
+    L.push('タッチ点 ' + a.touchPoints + ' / 操作ボタン ' + (a.touchShown ? '出ている' : '出ていない') +
+           ' / 押す的 最小 ' + a.minTap + 'px');
+    L.push('音 ' + a.audio + ' / 演出の抑制 ' + (a.reduced ? 'ON' : 'OFF') + '（' + a.reducedFrom + '）' +
+           ' / 保存 ' + (a.store ? '使える' : '使えない'));
+    L.push('fps ' + (fps == null ? '未計測' : fps.toFixed(0)));
+    L.push('');
+    L.push('[自動判定]');
+    v.forEach(function (r) { L.push((r.ok ? '○ ' : '× ') + r.q + ' … ' + r.got); });
+    L.push('');
+    L.push('[実機で確かめること]');
+    MANUAL.forEach(function (m) { L.push(mark(state[m.id]) + ' ' + m.q); });
+    var ng = MANUAL.filter(function (m) { return state[m.id] === false; });
+    var un = MANUAL.filter(function (m) { return state[m.id] == null; });
+    L.push('');
+    L.push('× が付いたもの: ' + (ng.length ? ng.map(function (m) { return m.q; }).join(' / ') : 'なし'));
+    if (un.length) L.push('未判定: ' + un.length + ' 件');
+    L.push('');
+    L.push(a.ua);
+    return L.join('\n');
+  }
+
+  function copyReport() {
+    var txt = report();
+    var note = el('dev-note');
+    var done = function (ok) {
+      if (!note) return;
+      note.textContent = ok ? 'コピーしました。そのまま貼って送ってください。'
+                            : 'コピーできませんでした。下の文字を長押しで選んでください。';
+      if (!ok) {
+        var ta = document.createElement('textarea');
+        ta.className = 'dev-out';
+        ta.readOnly = true;
+        ta.value = txt;
+        note.appendChild(ta);
+        ta.focus(); ta.select();
+      }
+    };
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(txt).then(function () { done(true); }, function () { done(false); });
+        return;
+      }
+    } catch (e) { /* 下の手動コピーへ */ }
+    done(false);
+  }
+
+  BM.devicecheck = {
+    open: function () { fps = null; render(); },
+    report: report,
+    auto: auto,
+    verdicts: function () { return verdicts(auto()); },
+    MANUAL: MANUAL,
+    MIN_TAP: MIN_TAP
+  };
+})(BM);
+</script>
+<script>
+/* =========================================================
    DEEP FALL — 本体（ロジック + 描画）
    ========================================================= */
 (function (BM) {
@@ -3709,7 +4063,13 @@ BM.DIRS = [
       el.rewardToast = document.getElementById('reward-toast');
     },
     hide: function () { BM.ads.cancel(); el.overlay.classList.add('hidden'); },
-    show: function (html) { el.panel.innerHTML = html; el.overlay.classList.remove('hidden'); },
+    show: function (html) {
+      // 端末チェックが張った専用の見た目と click を必ず落としてから描き替える
+      el.panel.classList.remove('dev');
+      el.panel.onclick = null;
+      el.panel.innerHTML = html;
+      el.overlay.classList.remove('hidden');
+    },
 
     banner: function (text) {
       el.banner.textContent = text;
@@ -3786,6 +4146,7 @@ BM.DIRS = [
         '<div class="menu">' +
         '<button data-act="play">▶ 落ちる</button>' +
         '<button data-act="how">📖 あそびかた</button>' +
+        '<button data-act="device">📱 端末チェック</button>' +
         '</div>' +
         '<div class="tips">最高到達 <b>' + g.bestDepth + 'm</b> ／ ハイスコア <b>' +
         g.bestScore.toLocaleString('en-US') + '</b></div>'
@@ -3894,6 +4255,7 @@ BM.DIRS = [
         ui.showTitle(game);
         break;
       case 'how': ui.showHow(); break;
+      case 'device': BM.devicecheck.open(); break;
       case 'back': ui.showTitle(game); break;
     }
   }
@@ -3970,6 +4332,25 @@ BM.DIRS = [
     requestAnimationFrame(frame);
   }
 
+  /* 横持ちで画面が覆われている間は止める。
+     案内を出しているのに裏で落ち続けていると、見えないまま墜落する。
+     縦に戻した時は自動で再開しない（ポーズ画面から自分で戻す）。
+     持ち替えている最中に勝手に動き出すと、その一瞬で死ぬ。 */
+  function watchOrientation() {
+    var mq;
+    try {
+      mq = window.matchMedia('(hover:none) and (pointer:coarse) and (orientation:landscape) and (max-height:480px)');
+    } catch (e) { return; }
+    var onChange = function () {
+      if (!mq.matches || !game) return;
+      if (game.state === BM.S_PLAY) { game.state = BM.S_PAUSE; ui.showPause(); }
+    };
+    if (mq.addEventListener) mq.addEventListener('change', onChange);
+    else if (mq.addListener) mq.addListener(onChange);
+    BM.isCovered = function () { return !!mq.matches; };
+    onChange();
+  }
+
   window.addEventListener('load', function () {
     // 演出を抑えるかどうかは、何かを描く前に決めておく
     BM.a11y.apply();
@@ -3982,9 +4363,12 @@ BM.DIRS = [
     if (/[?&]inspect=1/.test(location.search)) game.noDeath = true;
     // ?noads=1 で広告を止める（テストや動作確認用）
     if (/[?&]noads=1/.test(location.search)) BM.ads.enabled = false;
+    // ?device=1 … 端末チェックを直接開く（実機に URL を渡す時に使う）
+    if (/[?&]device=1/.test(location.search)) setTimeout(function () { BM.devicecheck.open(); }, 0);
     // ?reduce=1 / ?reduce=0 … 演出の抑制を明示する（検査用。保存もされる）
     var rm = /[?&]reduce=([01])/.exec(location.search);
     if (rm) BM.a11y.set(rm[1] === '1');
+    watchOrientation();
     ui.showTitle(game);
     requestAnimationFrame(frame);
   });

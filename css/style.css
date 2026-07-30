@@ -346,7 +346,6 @@ canvas#game{
 }
 .tbtn.big{width:76px;height:76px;font-size:30px;border-color:var(--hot)}
 .tbtn:active{background:#3d2a63;transform:scale(.94)}
-@media (hover:none) and (pointer:coarse){ #touch{display:flex} #legend{display:none} }
 
 /* ---------- legend ---------- */
 #legend{
@@ -354,6 +353,38 @@ canvas#game{
   font-size:11px;color:var(--dim);
 }
 #legend b{color:#ffe9a8;font-weight:700}
+
+/* 指で触る端末では、操作ボタンを出してキーの凡例を隠す。
+   この指定は #legend / #touch の定義より後に置かないと効かない
+   （同じ詳細度なので、後に書いたほうが勝つ）。
+   実際、以前はこれが #legend の定義より前にあり、スマホでキーの凡例が
+   出たままになっていた。狭い画面で縦を食うので、ただの害だった。 */
+@media (hover:none) and (pointer:coarse){
+  #touch{display:flex}
+  #legend{display:none}
+}
+
+/* ---------- 横持ちの案内 ----------
+   縦坑は縦に長いので、低い画面には物理的に入らない。
+   横持ちの実機（高さ 480px 以下）では 520px 幅の盤面が 555px の高さになり、
+   スクロールしないと下が見えない。見えないまま落ちるのが一番まずいので、
+   小さく縮めるのではなく縦に持ち替えてもらう。 */
+#rotate{display:none}
+@media (hover:none) and (pointer:coarse) and (orientation:landscape) and (max-height:480px){
+  #rotate{
+    display:flex;
+    position:fixed;inset:0;z-index:50;
+    align-items:center;justify-content:center;
+    background:rgba(8,5,15,.94);
+    backdrop-filter:blur(4px);
+    text-align:center;
+  }
+  .rot-box{padding:18px 22px}
+  .rot-icon{font-size:40px;transform:rotate(90deg);line-height:1.2}
+  .rot-title{font-size:19px;font-weight:800;margin-top:10px;color:var(--hot2)}
+  .rot-sub{font-size:12.5px;line-height:1.7;color:var(--dim);margin-top:8px}
+}
+.reduce-motion .rot-icon{transform:none}
 
 /* ---------- 演出を抑える設定 ----------
    クラスは JS（BM.a11y）が付ける。OS の prefers-reduced-motion を既定にしつつ、
@@ -382,3 +413,66 @@ canvas#game{
 .reduce-motion .hud-shield.fire .pips{ animation:none; transform:none; filter:none }
 .reduce-motion .menu button:active{ transform:none }
 .reduce-motion .ad-creative{ transition:none }
+
+/* ---------- 端末チェック ----------
+   実機の狭い画面で、指で触って結果を残せることが目的。
+   盤面の中に収まるので、パネル自体をスクロールさせる。 */
+.panel.dev{
+  max-width:96%;
+  max-height:100%;
+  overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
+  padding:14px 14px 18px;
+  text-align:left;
+}
+.dev-wrap{font-size:12px}
+.dev-sec{
+  font-size:10px;font-weight:800;letter-spacing:.12em;
+  color:var(--dim);margin:12px 0 5px;
+}
+.dev-sec small{font-weight:600;letter-spacing:0;opacity:.8}
+.dev-list{display:flex;flex-direction:column;gap:3px}
+.dev-row{
+  display:flex;align-items:center;gap:7px;
+  background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.07);
+  border-radius:8px;padding:5px 8px;
+}
+.dev-mark{
+  flex:0 0 auto;width:16px;text-align:center;
+  font-weight:800;color:var(--dim);
+}
+.dev-mark.ok{color:#8affd0}
+.dev-mark.ng{color:var(--hot)}
+.dev-q{flex:1;line-height:1.4}
+.dev-got{
+  flex:0 0 auto;display:flex;gap:4px;align-items:center;
+  font-size:11px;font-weight:700;color:var(--dim);
+  font-variant-numeric:tabular-nums;
+}
+/* 44px 以上。ゲームの操作ボタンにその基準を課しているのだから、
+   この画面のボタンが小さいのは筋が通らない */
+.dev-btn{
+  font:inherit;font-weight:800;font-size:14px;
+  min-width:44px;min-height:44px;
+  color:var(--ink);
+  background:linear-gradient(180deg,#2a1c45,#1a1130);
+  border:1px solid #402f66;border-radius:8px;
+  cursor:pointer;
+}
+.dev-btn.on{border-color:#8affd0;color:#8affd0}
+.dev-btn.on.ng{border-color:var(--hot);color:var(--hot)}
+.dev-info{
+  font-size:11px;line-height:1.7;color:var(--dim);
+  background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.07);
+  border-radius:8px;padding:7px 9px;
+}
+.dev-ua{font-size:9.5px;opacity:.7;word-break:break-all}
+.dev-note{font-size:11.5px;color:#ffe9a8;margin-top:8px;line-height:1.6}
+.dev-out{
+  width:100%;height:120px;margin-top:6px;
+  font:11px/1.5 ui-monospace,monospace;
+  color:var(--ink);background:#120c20;
+  border:1px solid #402f66;border-radius:8px;padding:6px;
+}
