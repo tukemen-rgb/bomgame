@@ -489,6 +489,77 @@ function installPilot() {
     return document.querySelectorAll('#shield-pips .pip.on').length === 2;
   }));
 
+  /* ---- 常設の状態表示（爆風・スロー・結晶の倍率） ----
+     持っているのに画面のどこにも無い＝プレイヤーには存在しないのと同じ。
+     シールドで一度やった失敗なので、残りの3つも同じ基準で見る。
+     canvas の中身は読めないので、表示に使う値そのものと、
+     「値を変えたら絵が変わること」の両方を確かめる。 */
+  const stat = await page.evaluate(() => {
+    const g = BM.game;
+    g.newRun(); BM.ui.hide();
+    const idle = g.statusRows().map(r => r.key);
+    g.player.power = 4;
+    g.player.slow = g.player.slowMax = 6;
+    g.coinRun = 3; g.coinRunT = 1.2;
+    const on = g.statusRows();
+    for (let i = 0; i < 600; i++) g.update(1 / 120);   // 5秒進める
+    const late = g.statusRows();
+    g.player.power = BM.MAX_POWER;
+    const full = g.statusRows().find(r => r.key === 'power');
+    for (let i = 0; i < 200; i++) g.update(1 / 120);   // スローを切らす
+    const after = g.statusRows().map(r => r.key);
+    return {
+      idle, after,
+      keys: on.map(r => r.key),
+      power: on.find(r => r.key === 'power'),
+      slow: on.find(r => r.key === 'slow'),
+      coin: on.find(r => r.key === 'coin'),
+      slowLate: late.find(r => r.key === 'slow'),
+      full: { text: full.text, full: full.full }
+    };
+  });
+  console.log('  --- 常設の状態表示 ---');
+  console.log(`  何も無い時: ${JSON.stringify(stat.idle)} / 付与後: ${JSON.stringify(stat.keys)}` +
+              ` / スロー切れ後: ${JSON.stringify(stat.after)}`);
+  console.log(`  爆風 ${stat.power.text} / スロー ${stat.slow.text}→${stat.slowLate.text}` +
+              `${stat.slowLate.warn ? '(点滅)' : ''} / 結晶 ${stat.coin.text}`);
+  check('爆風は常に画面に出ている', stat.idle.indexOf('power') >= 0 && stat.power.text === '4/6');
+  check('爆風が最大だと最大と分かる', stat.full.text === '6/6' && stat.full.full === true);
+  check('スローは持っている間だけ出る',
+    stat.idle.indexOf('slow') < 0 && stat.keys.indexOf('slow') >= 0 && stat.after.indexOf('slow') < 0);
+  check(`スローの残り時間が減る（${stat.slow.text} → ${stat.slowLate.text}）`,
+    stat.slowLate.value < stat.slow.value && stat.slowLate.frac < stat.slow.frac);
+  check('切れる直前に点滅する', stat.slowLate.warn === true);
+  check('結晶の倍率は連続中だけ出る',
+    stat.idle.indexOf('coin') < 0 && stat.coin.text === '×3');
+
+  // 値が本当に絵に反映されているか（左上の描画量を比べる）
+  const drawn = await page.evaluate(() => {
+    const g = BM.game, ctx = document.getElementById('game').getContext('2d');
+    const sum = () => {
+      const d = ctx.getImageData(8, 8, 150, 70).data;
+      let n = 0;
+      for (let i = 0; i < d.length; i += 4) n += d[i] + d[i + 1] + d[i + 2];
+      return n;
+    };
+    g.newRun(); BM.ui.hide(); g.noDeath = false;
+    g.player.power = 2; g.player.slow = 0; g.coinRun = 0; g.render();
+    const a = sum();
+    g.player.power = BM.MAX_POWER; g.render();
+    const b = sum();
+    g.player.slow = g.player.slowMax = 5; g.coinRun = 4; g.coinRunT = 1.2; g.render();
+    const c = sum();
+    // スロー中は周辺が紫に振れる（数字だけでなく世界の見た目でも分かる）
+    const corner = () => { const d = ctx.getImageData(4, BM.VIEW_H - 8, 4, 4).data; return [d[0], d[2]]; };
+    g.player.slow = 0; g.render(); const cold = corner();
+    g.player.slow = g.player.slowMax = 5; g.render(); const warm = corner();
+    return { a, b, c, cold, warm };
+  });
+  console.log(`  左上の描画量: 爆風2 ${drawn.a} → 爆風6 ${drawn.b} → 全部 ${drawn.c}`);
+  check('表示は値によって絵が変わる（＝本当に描かれている）', drawn.a !== drawn.b && drawn.c > drawn.b);
+  check(`スロー中は画面の縁が紫に振れる（青 ${drawn.cold[1]}→${drawn.warm[1]}）`,
+    drawn.warm[1] > drawn.cold[1]);
+
   /* ---- 爆弾で掘れること ---- */
   const dug = await page.evaluate(() => {
     const g = BM.game;

@@ -1803,6 +1803,7 @@ BM.DIRS = [
     this.iframe = 0;       // シールド発動直後の無敵
     this.shieldFlash = 0;  // 発動演出
     this.slow = 0;
+    this.slowMax = 0;   // 残り時間を割合で出すために、もらった長さを覚えておく
 
     this.alive = true;
     this.dir = 0;          // -1 / 0 / 1
@@ -2595,7 +2596,7 @@ BM.DIRS = [
           // 上限突破ぶんを持っている時に min() で丸めると、拾ったのに減る。
           // 拾いで増えるのは通常の上限までだが、それを下回らせてはいけない。
           case 'SHIELD': if (p.shield < BM.SHIELD_MAX) p.shield += 1; break;
-          case 'SLOW':   p.slow = 3.5; break;
+          case 'SLOW':   p.slow = p.slowMax = 3.5; break;
           // 結晶は取るほど連なって点が伸びる。落ちながらの寄り道の見返り
           case 'COIN':
             this.coinRun = (this.coinRun || 0) + 1;
@@ -2610,7 +2611,11 @@ BM.DIRS = [
           BM.sound.coin(this.coinRun);
         } else {
           this.score += 100;
-          this.fx.text(ix, iy - 14, def.label, def.color, 15);
+          var msg = def.label;
+          if (it.type === 'POWER') msg = '爆風 ' + p.power + '/' + BM.MAX_POWER;
+          else if (it.type === 'SHIELD') msg = 'シールド ' + p.shield + '枚';
+          else if (it.type === 'BOMB') msg = '爆弾 ' + p.bombs + '/' + BM.MAX_BOMBS;
+          this.fx.text(ix, iy - 14, msg, def.color, 15);
           BM.sound.pickup();
         }
         this.fx.sparkle(ix, iy, def.color);
@@ -2634,7 +2639,7 @@ BM.DIRS = [
       got.push('シールド ' + BM.SHIELD_CAP + '枚（上限突破）');
     }
     if (k.powerFull && p.power < BM.MAX_POWER) { p.power = BM.MAX_POWER; got.push('爆風 最大'); }
-    if (k.slow) { p.slow = k.slow; got.push('スロー ' + k.slow + '秒'); }
+    if (k.slow) { p.slow = p.slowMax = k.slow; got.push('スロー ' + k.slow + '秒'); }
     this.score += r.bonus;
     this.reward = { kind: k, t: 0, depth: r.depth, bonus: r.bonus };
     this.fx.addFlash(0.3, '255,224,120');
@@ -2700,6 +2705,7 @@ BM.DIRS = [
     g.restore();
     this.drawDepthRail(g, z);
     this.drawVignette(g);
+    this.drawStatus(g);
     if (this.noDeath) this.drawInspectBadge(g);
 
     var ctx = this.ctx;
@@ -3395,11 +3401,110 @@ BM.DIRS = [
     g.restore();
   };
 
+  /* 画面左上に出す常設の状態表示。
+     HUD は幅が一杯で、爆風もスローも結晶の倍率も出す場所が無かった。
+     「持っているのに画面のどこにも無い」＝プレイヤーには存在しないのと同じなので、
+     縦坑の中の空いている左上に置く。
+
+     描く内容はここで組み立てて返し、描画はそれを読むだけにしてある。
+     canvas の中身はテストから読めないので、こうしておかないと
+     「本当に出ているか」を機械で確かめられない。 */
+  Game.prototype.statusRows = function () {
+    var p = this.player, rows = [];
+    // 爆風は常に出す。最大が何なのか分からないと「最大にした」も伝わらない
+    rows.push({
+      key: 'power', label: '爆風', color: '#ff8a4c',
+      value: p.power, of: BM.MAX_POWER,
+      frac: p.power / BM.MAX_POWER,
+      text: p.power + '/' + BM.MAX_POWER,
+      full: p.power >= BM.MAX_POWER,
+      warn: false
+    });
+    if (p.slow > 0) {
+      var sm = p.slowMax || 3.5;
+      rows.push({
+        key: 'slow', label: 'スロー', color: '#c9a6ff',
+        value: p.slow, of: sm,
+        frac: BM.clamp(p.slow / sm, 0, 1),
+        text: p.slow.toFixed(1) + '秒',
+        full: false,
+        warn: p.slow <= 1        // 切れる直前は点滅させる
+      });
+    }
+    if (this.coinRun > 0) {
+      rows.push({
+        key: 'coin', label: '結晶', color: '#ffe066',
+        value: this.coinRun, of: 5,
+        frac: BM.clamp(this.coinRunT / 1.2, 0, 1),
+        text: '×' + Math.min(5, this.coinRun),
+        full: this.coinRun >= 5,
+        warn: this.coinRunT <= 0.4
+      });
+    }
+    return rows;
+  };
+
+  Game.prototype.drawStatus = function (g) {
+    var rows = this.statusRows();
+    if (!rows.length) return;
+    var LABEL_F = '700 10px system-ui, sans-serif';
+    var VAL_F = '800 10px system-ui, sans-serif';
+    var i, r;
+
+    // 幅は実測から組む。固定値で置くと、桁が伸びた時に数字がバーに重なる
+    g.save();
+    var labelW = 0, valW = 0;
+    g.font = LABEL_F;
+    for (i = 0; i < rows.length; i++) labelW = Math.max(labelW, g.measureText(rows[i].label).width);
+    g.font = VAL_F;
+    for (i = 0; i < rows.length; i++) valW = Math.max(valW, g.measureText(rows[i].text).width);
+    var PAD = 8, GAP = 7, BAR = 44, rh = 15;
+    var w = Math.ceil(PAD + labelW + GAP + BAR + GAP + valW + PAD);
+    var h = PAD * 2 - 4 + rows.length * rh;
+    // 構造確認モードのバッジと同じ場所なので、その下へずらす
+    var x0 = 8, y0 = this.noDeath ? 70 : 8;
+
+    g.fillStyle = 'rgba(10,6,18,.72)';
+    g.beginPath(); roundRect(g, x0, y0, w, h, 7); g.fill();
+    g.strokeStyle = 'rgba(255,255,255,.1)'; g.lineWidth = 1; g.stroke();
+
+    for (i = 0; i < rows.length; i++) {
+      r = rows[i];
+      var y = y0 + PAD + 2 + i * rh;
+      // 点滅は「切れる直前」だけ。常時光らせると意味が薄れる
+      var a = r.warn ? (0.45 + 0.55 * Math.abs(Math.sin(this.stateT * 9))) : 1;
+      g.globalAlpha = a;
+      g.font = LABEL_F;
+      g.textAlign = 'left'; g.textBaseline = 'middle';
+      g.fillStyle = 'rgba(230,220,250,.75)';
+      g.fillText(r.label, x0 + PAD, y);
+      // 残量のバー
+      var bx = x0 + PAD + labelW + GAP;
+      g.fillStyle = 'rgba(255,255,255,.12)';
+      g.fillRect(bx, y - 3, BAR, 5);
+      g.fillStyle = r.color;
+      g.fillRect(bx, y - 3, Math.max(1, BAR * r.frac), 5);
+      if (r.full) {
+        g.strokeStyle = r.color; g.lineWidth = 1;
+        g.strokeRect(bx - 1.5, y - 4.5, BAR + 3, 8);
+      }
+      g.font = VAL_F;
+      g.textAlign = 'right';
+      g.fillStyle = r.color;
+      g.fillText(r.text, x0 + w - PAD, y);
+      g.globalAlpha = 1;
+    }
+    g.restore();
+  };
+
   Game.prototype.drawVignette = function (g) {
     var v = 0.4 + this.fx.vignette * 0.45;
+    // スロー中は周辺を紫に振る。数字だけだと、効いている実感が無い
+    var slow = this.player.slow > 0;
+    var col = this.fx.vignette > 0.05 ? '60,0,0' : (slow ? '58,30,96' : '0,0,0');
     var gr = g.createRadialGradient(W / 2, H / 2, H * 0.32, W / 2, H / 2, H * 0.8);
     gr.addColorStop(0, 'rgba(0,0,0,0)');
-    gr.addColorStop(1, 'rgba(' + (this.fx.vignette > 0.05 ? '60,0,0' : '0,0,0') + ',' + v.toFixed(2) + ')');
+    gr.addColorStop(1, 'rgba(' + col + ',' + (slow ? Math.min(0.92, v + 0.16) : v).toFixed(2) + ')');
     g.fillStyle = gr;
     g.fillRect(0, 0, W, H);
   };
@@ -3608,6 +3713,10 @@ BM.DIRS = [
         '<p><b>爆弾は腰のポーチから取り出す。</b>初期3個・最大9個で、拾わない限り増えない。<br>' +
         '画面右上の丸が残数。<b style="color:#ff8a6a">0になると赤く点滅し、押しても空振りする</b>ので、<br>' +
         'どの層で使うかを決めてから落とすこと。💣 のアイテムで1個補充できる。</p>' +
+        '<p><b>画面左上に、今の状態が常に出ている。</b>' +
+        '<b style="color:#ff8a4c">爆風</b>（2〜6。大きいほど広く掘れる）／' +
+        '<b style="color:#c9a6ff">スロー</b>の残り時間（切れる直前に点滅する。スロー中は画面の縁が紫）／' +
+        '<b style="color:#ffe066">結晶</b>の連続倍率（続けて拾うと最大5倍）。</p>' +
         '<p>100m ごとに地層が変わり、落下速度も層の間隔も上がっていく。</p>' +
         '<p><b style="color:#ffe066">200m ごとに「ご褒美の間」がある。</b>' +
         'その区間だけ岩が無く、爆弾の補給・シールド・爆風アップ・結晶（💠 点数）が' +
