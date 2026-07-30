@@ -46,6 +46,7 @@ function installPilot() {
   window.__deaths = [];
   window.__passed = 0;
   BM.autopilot.enabled = true;
+  BM.ads.enabled = false;   // 自動走行の邪魔になるので広告は止める
   const orig = BM.Game.prototype.update;
   BM.Game.prototype.update = function (dt) {
     const was = this.player.alive;
@@ -98,6 +99,48 @@ function installPilot() {
   await page.waitForTimeout(800);
   check('岩に触れたら墜落する', await page.evaluate(() => BM.game.state === 'over' && !BM.game.player.alive));
   await shot('02-crash.png');
+
+  /* ---- ゲームオーバー時の広告 ----
+     出ること・スキップできること・結果画面に必ず戻ることを確かめる。
+     広告のせいで結果が見られなくなるのが一番まずい。 */
+  await page.evaluate(() => {
+    BM.ads.everyN = 1; BM.ads.minGapMs = 0; BM.ads.skipAfter = 1;
+    BM.ads._count = 0; BM.ads._lastAt = 0;
+    BM.game.newRun(); BM.ui.hide();
+    BM.game.crash(BM.game.player, 7, BM.rowOf(BM.game.player.y));
+  });
+  await page.waitForTimeout(300);
+  check('ゲームオーバーで広告枠が出る', await page.isVisible('#ad-slot'));
+  check('「広告」と明示されている',
+    (await page.textContent('.ad-label')) === '広告');
+  check('出た直後はスキップできない', await page.evaluate(() => document.getElementById('ad-skip').disabled));
+  await shot('07-ad.png');
+  await page.waitForTimeout(1400);
+  check('一定秒後にスキップできるようになる',
+    await page.evaluate(() => !document.getElementById('ad-skip').disabled));
+  await page.click('#ad-skip');
+  await page.waitForTimeout(200);
+  check('スキップすると結果画面が出る',
+    (await page.textContent('#panel')).indexOf('到達深度') >= 0);
+  check('広告が消えている', !(await page.isVisible('#ad-slot')));
+  await shot('08-result.png');
+
+  // 頻度制御。毎回出したら邪魔なだけ
+  check('everyN=2 なら次のゲームオーバーでは出ない', await page.evaluate(() => {
+    BM.ads.everyN = 2; BM.ads._count = 0; BM.ads._lastAt = 0;
+    BM.game.newRun(); BM.ui.hide();
+    BM.game.crash(BM.game.player, 7, BM.rowOf(BM.game.player.y));
+    return !document.getElementById('ad-slot');
+  }));
+  check('?noads=1 で広告を止められる', await page.evaluate(() => {
+    BM.ads.enabled = false;
+    BM.ads.everyN = 1; BM.ads._count = 0; BM.ads._lastAt = 0;
+    BM.game.newRun(); BM.ui.hide();
+    BM.game.crash(BM.game.player, 7, BM.rowOf(BM.game.player.y));
+    const ok = !document.getElementById('ad-slot');
+    BM.ads.enabled = true;
+    return ok;
+  }));
 
   /* ---- 自動操縦で実際に潜らせる ---- */
   await page.evaluate(installPilot);

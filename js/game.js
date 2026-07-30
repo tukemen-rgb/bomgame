@@ -993,14 +993,12 @@
     void x;
   };
 
-  /* 観戦モード／構造確認モードの状態表示。
-     何が起きているのか（誰が操作しているのか、詰まったのか）を
-     画面の中で完結して分かるようにしておく。 */
+  /* 構造確認モードの状態表示。
+     何が起きているのか（詰まったのか）を画面内で完結して分かるようにしておく。 */
   Game.prototype.drawInspectBadge = function (g) {
     var n = this.deathLog.length;
-    var auto = BM.autopilot.enabled;
     var lines = [
-      auto ? '観戦モード（自動操縦・無敵）' : '構造確認モード（無敵）',
+      '構造確認モード（無敵）',
       '深度 ' + this.player.deepest + 'm   通過 ' + this.passedCount + ' 層' +
         (this.speedMul > 1 ? '   速度 ×' + this.speedMul : ''),
       n === 0 ? '詰まり 0 件 — 構造に問題なし'
@@ -1017,7 +1015,7 @@
     g.strokeStyle = n ? 'rgba(255,90,70,.85)' : 'rgba(120,255,180,.75)';
     g.lineWidth = 1.5; g.stroke();
     for (var j = 0; j < lines.length; j++) {
-      g.fillStyle = j === 0 ? (auto ? '#8fd6ff' : '#8affd0')
+      g.fillStyle = j === 0 ? '#8affd0'
                   : (j === 2 && n ? '#ff8a7a' : 'rgba(230,220,255,.85)');
       g.fillText(lines[j], 17, 22 + j * 13);
     }

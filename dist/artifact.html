@@ -49,7 +49,7 @@ body{
 }
 .hud-cell{display:flex;flex-direction:column;gap:2px;min-width:58px;white-space:nowrap;flex-shrink:0}
 .hud-depth{min-width:86px}
-/* 観戦モードの早送りでスコアが7桁まで伸びるので、その幅を確保しておく */
+/* 早送りでスコアが7桁まで伸びるので、その幅を確保しておく */
 .hud-score-cell{min-width:100px}
 .hud-depth .hud-value{font-size:24px;color:#ffd23d}
 .hud-depth small{font-size:12px;opacity:.7;margin-left:1px}
@@ -184,6 +184,62 @@ canvas#game{
   background:#241a3b;border:1px solid #392a5c;border-radius:4px;
   padding:1px 5px;font-size:11px;color:#ffe9a8;
 }
+
+/* ---------- 広告枠 ----------
+   何が広告なのかを隠さないこと。ラベルと枠線でゲーム画面と明確に分ける。 */
+.ad-wrap{display:flex;flex-direction:column;gap:10px;align-items:center}
+.ad-head{
+  display:flex;align-items:center;gap:8px;
+  width:min(300px,80vw);
+}
+.ad-label{
+  font-size:9px;font-weight:800;letter-spacing:.18em;
+  color:#0d0a16;background:#9a86c4;
+  border-radius:3px;padding:2px 6px;
+}
+.ad-note{font-size:10px;color:var(--dim)}
+.ad-slot{
+  width:min(300px,80vw);
+  aspect-ratio:300/250;
+  border:1px solid #4a3a6b;
+  border-radius:10px;
+  overflow:hidden;
+  background:#150e26;
+  display:flex;
+}
+.ad-creative{
+  flex:1;display:flex;flex-direction:column;gap:8px;
+  padding:16px 18px;text-align:left;cursor:pointer;
+  background:
+    radial-gradient(120% 80% at 100% 0%, color-mix(in srgb, var(--ad) 22%, transparent) 0%, transparent 60%),
+    linear-gradient(180deg,#1d1533,#120c20);
+  transition:filter .15s ease;
+}
+.ad-creative:hover{filter:brightness(1.15)}
+.ad-tag{
+  align-self:flex-start;
+  font-size:9px;font-weight:700;letter-spacing:.14em;
+  color:var(--ad);border:1px solid var(--ad);
+  border-radius:3px;padding:1px 5px;opacity:.85;
+}
+.ad-title{font-size:16px;font-weight:800;line-height:1.35;color:var(--ink);text-wrap:balance}
+.ad-body{font-size:11.5px;line-height:1.75;color:var(--dim);flex:1}
+.ad-cta{
+  font-size:12px;font-weight:800;color:var(--ad);
+  align-self:flex-start;
+  border-bottom:1px solid color-mix(in srgb, var(--ad) 50%, transparent);
+  padding-bottom:2px;
+}
+.ad-skip{
+  font:inherit;font-weight:700;font-size:13px;
+  color:var(--ink);
+  background:linear-gradient(180deg,#2a1c45,#1a1130);
+  border:1px solid #402f66;border-radius:8px;
+  padding:8px 20px;cursor:pointer;
+  min-width:120px;
+}
+.ad-skip:disabled{opacity:.45;cursor:default}
+.ad-skip:not(:disabled):hover{border-color:var(--hot2)}
 
 /* ---------- combo banner ---------- */
 #combo-banner{
@@ -1612,12 +1668,11 @@ BM.DIRS = [
 /* =========================================================
    DEEP FALL — 自動操縦
 
-   本来はテスト用に書いたもの。
-   「操作は苦手だけど構造が最後まで大丈夫か見たい」という用途に、
-   そのまま観戦モードとして本体に載せている。
+   テスト（npm test / npm run audit）が縦坑を実際に潜るために使う。
+   プレイヤー向けの機能ではないので、ゲーム側からは有効にならない。
 
-   テストと本体で同じコードを使うのが肝心。
-   検査に通ったのが「出荷される操縦」でないと意味がない。
+   テストはこのページを丸ごと読み込んで走るので、index.html に載せておく必要がある。
+   テスト側に複製を置くと、検査に通ったものと出荷されるものが別物になってしまう。
 
    考え方：
      ・2層先まで見る（人間が画面で見えている範囲と同じ）
@@ -1715,6 +1770,166 @@ BM.DIRS = [
   };
 
   BM.autopilot = autopilot;
+})(BM);
+</script>
+<script>
+/* =========================================================
+   DEEP FALL — 広告枠（ゲームオーバー時のインタースティシャル）
+
+   ■ 実際の広告配信について
+   AdSense / AdMob などの実配信には、審査を通したアカウントと
+   配信元ドメインからの外部スクリプト読み込みが必要。
+   このゲームは外部通信をしない前提で作ってあり、Artifact として公開した
+   場合はセキュリティポリシーが外部スクリプトを全部ブロックする。
+   なので「配信そのもの」はここでは行えない。
+
+   代わりにこのモジュールは、広告の【枠と出し方】だけを実装している。
+     ・標準的な 300×250（レクタングル大）の枠
+     ・「広告」ラベル（何が広告なのかを隠さない）
+     ・カウントダウンと、一定秒後に押せるスキップ
+     ・出しすぎない頻度制御（毎回は出さない）
+   中身の既定値は自社広告（このゲーム自身の告知）。
+
+   ■ 実際の配信に差し替える方法
+     BM.ads.provider = {
+       // container に配信タグを差し込み、表示が終わったら done() を呼ぶ
+       fill: function (container, done) { ... }
+     };
+   provider を入れれば自社広告の代わりにそれが使われる。
+   枠・ラベル・スキップ・頻度制御はそのまま流用できる。
+   ========================================================= */
+(function (BM) {
+  'use strict';
+
+  /* 既定の中身は自社広告。
+     実在しない企業や商品を騙るものは作らない（それは偽の広告になる）ので、
+     このゲーム自身のことだけを書いている。 */
+  var HOUSE = [
+    {
+      accent: '#ffd23d',
+      tag: '自社広告',
+      title: 'まだ 500m は見ていない',
+      body: '地層は 100m ごとに姿を変える。表土・玄武岩・結晶層・熱層・氷結層、' +
+            'そして 500m から先はずっと「深淵」。',
+      cta: 'もう一度落ちる'
+    },
+    {
+      accent: '#8ce8ff',
+      tag: '自社広告',
+      title: 'シールドは読み違えを1回だけ許す',
+      body: '🛡 を拾うと、岩に触れても死なずに突き破る。持っている間は' +
+            '落下予測線が青くなるので、今が安全かは常に見えている。',
+      cta: 'シールドを探しに行く'
+    },
+    {
+      accent: '#ff8a5c',
+      tag: '自社広告',
+      title: '爆弾は腰のポーチに3個だけ',
+      body: '全面岩の層は壁のボタンで抜ける。爆弾は本当に詰まった時の切り札。' +
+            'どこで使うかを決めてから落とす。',
+      cta: '使いどころを試す'
+    },
+    {
+      accent: '#c9a6ff',
+      tag: '自社広告',
+      title: '埋まった爆弾を撃ち抜くと大穴になる',
+      body: 'オレンジに光る岩に自分の爆弾を当てると誘爆する。' +
+            '連鎖するほど得点が伸びる、唯一の稼ぎ所。',
+      cta: '誘爆を狙う'
+    }
+  ];
+
+  var ads = {
+    enabled: true,
+    provider: null,     // 実配信に差し替えるための口
+    everyN: 2,          // 何回のゲームオーバーごとに出すか（毎回は出さない）
+    minGapMs: 45000,    // 前回の表示から最低これだけ空ける
+    skipAfter: 5,       // 何秒後にスキップを押せるようにするか
+    _count: 0,
+    _lastAt: 0,
+    _timer: null,
+    _pick: 0,
+
+    /* 今回は出すか。出しすぎると、ただ邪魔なだけになる。 */
+    shouldShow: function () {
+      if (!this.enabled) return false;
+      this._count++;
+      if (this._count % this.everyN !== 0) return false;
+      var now = Date.now();
+      if (now - this._lastAt < this.minGapMs) return false;
+      return true;
+    },
+
+    /* 出す必要が無ければ done() をそのまま呼ぶので、
+       呼び出し側は毎回これを通せばよい。 */
+    maybeShow: function (panel, done) {
+      if (!this.shouldShow()) { done(); return; }
+      this._lastAt = Date.now();
+      this.show(panel, done);
+    },
+
+    /* 表示中に画面が切り替わった時の後始末 */
+    cancel: function () {
+      if (this._timer) { clearInterval(this._timer); this._timer = null; }
+    },
+
+    show: function (panel, done) {
+      var self = this;
+      var creative = HOUSE[this._pick % HOUSE.length];
+      this._pick++;
+
+      panel.innerHTML =
+        '<div class="ad-wrap">' +
+        '  <div class="ad-head"><span class="ad-label">広告</span>' +
+        '    <span class="ad-note" id="ad-note">' + this.skipAfter + ' 秒後にスキップできます</span></div>' +
+        '  <div class="ad-slot" id="ad-slot"></div>' +
+        '  <button class="ad-skip" id="ad-skip" disabled>スキップ <span id="ad-count">' +
+             this.skipAfter + '</span></button>' +
+        '</div>';
+
+      var slot = panel.querySelector('#ad-slot');
+      var skip = panel.querySelector('#ad-skip');
+      var count = panel.querySelector('#ad-count');
+      var note = panel.querySelector('#ad-note');
+
+      var finished = false;
+      function finish() {
+        if (finished) return;
+        finished = true;
+        if (self._timer) { clearInterval(self._timer); self._timer = null; }
+        done();
+      }
+
+      if (this.provider && typeof this.provider.fill === 'function') {
+        // 実配信。表示が終わったら provider 側から done を呼ばせる
+        this.provider.fill(slot, finish);
+      } else {
+        slot.innerHTML =
+          '<div class="ad-creative" style="--ad:' + creative.accent + '">' +
+          '  <div class="ad-tag">' + creative.tag + '</div>' +
+          '  <div class="ad-title">' + creative.title + '</div>' +
+          '  <div class="ad-body">' + creative.body + '</div>' +
+          '  <div class="ad-cta">' + creative.cta + ' ▶</div>' +
+          '</div>';
+        // 自社広告なので、クリックしたらそのまま結果画面へ進める
+        slot.addEventListener('click', finish);
+      }
+
+      var left = this.skipAfter;
+      skip.addEventListener('click', function () { if (!skip.disabled) finish(); });
+      this._timer = setInterval(function () {
+        left--;
+        if (left > 0) { count.textContent = left; return; }
+        clearInterval(self._timer); self._timer = null;
+        skip.disabled = false;
+        count.textContent = '';
+        skip.textContent = 'スキップ ▶';
+        note.textContent = 'スキップして結果を見る';
+      }, 1000);
+    }
+  };
+
+  BM.ads = ads;
 })(BM);
 </script>
 <script>
@@ -2713,14 +2928,12 @@ BM.DIRS = [
     void x;
   };
 
-  /* 観戦モード／構造確認モードの状態表示。
-     何が起きているのか（誰が操作しているのか、詰まったのか）を
-     画面の中で完結して分かるようにしておく。 */
+  /* 構造確認モードの状態表示。
+     何が起きているのか（詰まったのか）を画面内で完結して分かるようにしておく。 */
   Game.prototype.drawInspectBadge = function (g) {
     var n = this.deathLog.length;
-    var auto = BM.autopilot.enabled;
     var lines = [
-      auto ? '観戦モード（自動操縦・無敵）' : '構造確認モード（無敵）',
+      '構造確認モード（無敵）',
       '深度 ' + this.player.deepest + 'm   通過 ' + this.passedCount + ' 層' +
         (this.speedMul > 1 ? '   速度 ×' + this.speedMul : ''),
       n === 0 ? '詰まり 0 件 — 構造に問題なし'
@@ -2737,7 +2950,7 @@ BM.DIRS = [
     g.strokeStyle = n ? 'rgba(255,90,70,.85)' : 'rgba(120,255,180,.75)';
     g.lineWidth = 1.5; g.stroke();
     for (var j = 0; j < lines.length; j++) {
-      g.fillStyle = j === 0 ? (auto ? '#8fd6ff' : '#8affd0')
+      g.fillStyle = j === 0 ? '#8affd0'
                   : (j === 2 && n ? '#ff8a7a' : 'rgba(230,220,255,.85)');
       g.fillText(lines[j], 17, 22 + j * 13);
     }
@@ -2851,7 +3064,7 @@ BM.DIRS = [
       }
       el.banner = document.getElementById('combo-banner');
     },
-    hide: function () { el.overlay.classList.add('hidden'); },
+    hide: function () { BM.ads.cancel(); el.overlay.classList.add('hidden'); },
     show: function (html) { el.panel.innerHTML = html; el.overlay.classList.remove('hidden'); },
 
     banner: function (text) {
@@ -2904,7 +3117,6 @@ BM.DIRS = [
         '<div class="menu">' +
         '<button data-act="play">▶ 落ちる</button>' +
         '<button data-act="how">📖 あそびかた</button>' +
-        '<button data-act="watch">👁 観戦モード<small>自動操縦で勝手に潜る。操作不要・墜落なし</small></button>' +
         '</div>' +
         '<div class="tips">最高到達 <b>' + g.bestDepth + 'm</b> ／ ハイスコア <b>' +
         g.bestScore.toLocaleString('en-US') + '</b></div>'
@@ -2944,12 +3156,19 @@ BM.DIRS = [
         '<button data-act="title">◀ タイトルへ</button>' +
         '</div>' +
         '<div class="tips">音楽 <code>M</code> ／ 効果音 <code>N</code><br>' +
-        '観戦モード（自動操縦＋無敵） <code>O</code> ／ 早送り <code>T</code><br>' +
-        '無敵だけ（操作は自分で） <code>I</code></div>'
+        '構造確認モード（無敵） <code>I</code> ／ 早送り <code>T</code></div>'
       );
     },
 
+    /* ゲームオーバー。広告を出す回なら先に広告、そのあと結果。
+       結果を出す処理自体はいじらない（広告の有無で中身が変わらないように）。 */
     showGameOver: function (g) {
+      var self = this;
+      el.overlay.classList.remove('hidden');
+      BM.ads.maybeShow(el.panel, function () { self.renderGameOver(g); });
+    },
+
+    renderGameOver: function (g) {
       this.show(
         '<h2 style="color:#ff6a4e">墜落</h2>' +
         '<div class="rows">' +
@@ -2976,8 +3195,6 @@ BM.DIRS = [
     BM.sound.init();
     switch (name) {
       case 'play':
-        // 通常プレイに戻る。無敵（?inspect=1 や I キー）はそのまま尊重する
-        BM.autopilot.enabled = false;
         ui.reset();
         game.newRun();
         ui.hide();
@@ -2992,14 +3209,6 @@ BM.DIRS = [
         game.stateT = 0;
         BM.sound.stopMusic();
         ui.showTitle(game);
-        break;
-      case 'watch':
-        BM.autopilot.enabled = true;
-        ui.reset();
-        game.newRun();
-        game.noDeath = true;
-        ui.hide();
-        BM.sound.startMusic();
         break;
       case 'how': ui.showHow(); break;
       case 'back': ui.showTitle(game); break;
@@ -3028,16 +3237,7 @@ BM.DIRS = [
       ui.banner(game.noDeath ? '構造確認モード ON（無敵）' : '構造確認モード OFF');
       return;
     }
-    if (k === 'o') {   // 観戦モード。ゲームが自分で潜っていくのを眺めるだけ
-      var on = !BM.autopilot.enabled;
-      BM.autopilot.enabled = on;
-      game.noDeath = on;
-      BM.input.keys['ArrowLeft'] = BM.input.keys['ArrowRight'] = false;
-      ui.banner(on ? '観戦モード ON（自動操縦・無敵）' : '観戦モード OFF');
-      if (on && game.state === BM.S_TITLE) act('play');
-      return;
-    }
-    if (k === 't') {   // 観戦を早送りする（物理はそのまま、更新回数を増やす）
+    if (k === 't') {   // 早送り（構造確認用。物理はそのまま、更新回数を増やす）
       var steps = [1, 2, 4, 8];
       game.speedMul = steps[(steps.indexOf(game.speedMul) + 1) % steps.length];
       ui.banner('速度 ×' + game.speedMul);
@@ -3086,16 +3286,10 @@ BM.DIRS = [
     bindTouch();
     game = new BM.Game(document.getElementById('game'));
     BM.game = game;
-    // ?inspect=1 … 無敵（操作は自分でする）
-    // ?watch=1   … 観戦モード（自動操縦＋無敵）。そのまま落ち始める
+    // ?inspect=1 … 構造確認モード（無敵。操作は自分でする）
     if (/[?&]inspect=1/.test(location.search)) game.noDeath = true;
-    if (/[?&]watch=1/.test(location.search)) {
-      BM.autopilot.enabled = true;
-      game.noDeath = true;
-      var sp = /[?&]speed=(\d+)/.exec(location.search);
-      if (sp) game.speedMul = BM.clamp(parseInt(sp[1], 10) || 1, 1, 8);
-      setTimeout(function () { act('watch'); }, 60);
-    }
+    // ?noads=1 で広告を止める（テストや動作確認用）
+    if (/[?&]noads=1/.test(location.search)) BM.ads.enabled = false;
     ui.showTitle(game);
     requestAnimationFrame(frame);
   });
