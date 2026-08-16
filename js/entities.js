@@ -24,6 +24,7 @@
     this.iframe = 0;       // シールド発動直後の無敵
     this.shieldFlash = 0;  // 発動演出
     this.slow = 0;
+    this.slowMax = 0;   // 残り時間を割合で出すために、もらった長さを覚えておく
 
     this.alive = true;
     this.dir = 0;          // -1 / 0 / 1

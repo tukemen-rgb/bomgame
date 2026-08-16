@@ -142,6 +142,106 @@ function installPilot() {
     return ok;
   }));
 
+  /* ---- 外部配信が壊れた時に、プレイヤーが閉じ込められないか ----
+     広告ブロッカー・通信の失敗・SDK の読み込み失敗は普通に起きる。
+     その時に結果画面へ戻れなくなるのが、この枠で一番まずい壊れ方。
+     実配信の中身はテストできないが、壊れ方への耐性は今テストできる。 */
+  console.log('  --- 外部配信が壊れた時 ---');
+  const adFail = await page.evaluate(async () => {
+    const out = {};
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    const fire = () => {
+      BM.ads.enabled = true;
+      BM.ads.everyN = 1; BM.ads.minGapMs = 0; BM.ads.skipAfter = 1;
+      BM.ads._count = 0; BM.ads._lastAt = 0;
+      BM.game.newRun(); BM.ui.hide();
+      BM.game.crash(BM.game.player, 7, BM.rowOf(BM.game.player.y));
+    };
+
+    // (1) fill() がその場で例外を投げる（スクリプトがブロックされた時の形）
+    BM.ads.provider = { fill: function () { throw new Error('blocked'); } };
+    fire();
+    out.threwShown = !!document.getElementById('ad-slot');
+    out.threwSlotFilled = !!document.querySelector('#ad-slot .ad-creative');
+    out.threwSkipEnabled = !document.getElementById('ad-skip').disabled;
+    document.getElementById('ad-skip').click();
+    await sleep(150);
+    out.threwReachedResult = document.getElementById('panel').textContent.indexOf('到達深度') >= 0;
+
+    // (2) fill() が永久に返事をしない
+    BM.ads.provider = { fill: function () { /* 何もしない */ } };
+    BM.ads.providerTimeoutMs = 400;
+    fire();
+    await sleep(1400);   // スキップが押せるようになる時間 + 見切り時間
+    out.hangSkipEnabled = !document.getElementById('ad-skip').disabled;
+    out.hangSlotFilled = !!document.querySelector('#ad-slot .ad-creative');
+    document.getElementById('ad-skip').click();
+    await sleep(150);
+    out.hangReachedResult = document.getElementById('panel').textContent.indexOf('到達深度') >= 0;
+
+    // (3) 正常な外部配信：done() を呼べば結果画面へ進む
+    BM.ads.provider = { fill: function (c, done) { c.innerHTML = '<b id="ext">ext</b>'; setTimeout(done, 50); } };
+    fire();
+    out.extShown = !!document.getElementById('ext');
+    await sleep(300);
+    out.extReachedResult = document.getElementById('panel').textContent.indexOf('到達深度') >= 0;
+
+    BM.ads.provider = null;
+    BM.ads.providerTimeoutMs = 8000;
+    return out;
+  });
+  check('例外を投げても枠は出て、スキップがすぐ押せる',
+    adFail.threwShown && adFail.threwSkipEnabled);
+  check('例外を投げたら自前の中身に差し替わる（枠が空にならない）', adFail.threwSlotFilled);
+  check('例外を投げても結果画面に戻れる', adFail.threwReachedResult);
+  check('無反応でもスキップが押せるようになる', adFail.hangSkipEnabled);
+  check('無反応なら見切って自前の中身に差し替わる', adFail.hangSlotFilled);
+  check('無反応でも結果画面に戻れる', adFail.hangReachedResult);
+  check('正常な外部配信は中身が出て、done() で結果画面へ進む',
+    adFail.extShown && adFail.extReachedResult);
+
+  /* ---- サイト内の他ゲームを宣伝する使い方 ---- */
+  console.log('  --- サイト内の宣伝として使う ---');
+  const promo = await page.evaluate(async () => {
+    const sleep = ms => new Promise(r => setTimeout(r, ms));
+    const opened = [];
+    const realOpen = window.open;
+    window.open = function (url) { opened.push(url); return null; };
+    const clicked = [];
+    BM.ads.promos = [
+      { title: 'テストのゲーム', body: 'これは並べたもの', cta: '遊ぶ',
+        url: '/games/test', accent: '#8affd0', tag: 'おすすめ' }
+    ];
+    BM.ads.onClick = function (p) { clicked.push(p.title); };
+    BM.ads.enabled = true;
+    BM.ads.everyN = 1; BM.ads.minGapMs = 0; BM.ads.skipAfter = 1;
+    BM.ads._count = 0; BM.ads._lastAt = 0; BM.ads._pick = 0;
+    BM.game.newRun(); BM.ui.hide();
+    BM.game.crash(BM.game.player, 7, BM.rowOf(BM.game.player.y));
+
+    const out = {
+      title: (document.querySelector('#ad-slot .ad-title') || {}).textContent,
+      tag: (document.querySelector('#ad-slot .ad-tag') || {}).textContent,
+      label: (document.querySelector('.ad-label') || {}).textContent
+    };
+    document.querySelector('#ad-slot .ad-creative').click();
+    await sleep(150);
+    out.opened = opened.slice();
+    out.clicked = clicked.slice();
+    out.reachedResult = document.getElementById('panel').textContent.indexOf('到達深度') >= 0;
+
+    window.open = realOpen;
+    BM.ads.promos = null; BM.ads.onClick = null;
+    return out;
+  });
+  console.log(`  出た中身: 「${promo.title}」/ ラベル「${promo.label}」${promo.tag}` +
+              ` / 開いた先 ${JSON.stringify(promo.opened)} / 計測 ${JSON.stringify(promo.clicked)}`);
+  check('promos に入れたものが出る', promo.title === 'テストのゲーム');
+  check('宣伝であることを隠さない（ラベルが出ている）', promo.label === '広告');
+  check('押すと行き先が開く', promo.opened.length === 1 && promo.opened[0] === '/games/test');
+  check('押されたことを計測できる（onClick）', promo.clicked.length === 1);
+  check('押したあと結果画面へ進む', promo.reachedResult);
+
   /* ---- 自動操縦で実際に潜らせる ---- */
   await page.evaluate(installPilot);
   const depths = [];
@@ -183,27 +283,33 @@ function installPilot() {
   const insp = await page.evaluate(() => ({
     depth: BM.game.player.deepest,
     passed: window.__passed,
-    log: BM.game.deathLog.map(d => ({ depth: d.depth, type: d.type, cells: d.cells }))
+    log: BM.game.deathLog.map(d => ({ depth: d.depth, row: d.row, type: d.type, cells: d.cells }))
   }));
   await shot('06-inspect.png');
   await page.evaluate(() => { BM.game.noDeath = false; });
 
-  const per100 = insp.log.length / Math.max(1, insp.passed) * 100;
-  console.log(`  到達 ${insp.depth}m / ${insp.passed} 層を通過 / 詰まり ${insp.log.length} 件` +
-              ` (100層あたり ${per100.toFixed(1)} 件)`);
-  if (insp.log.length) {
+  /* 数えるのは「抜けられなかった層の数」。同じ層の中で岩に何回触ったかを
+     数えると、1枚の壁が何十件にも化けて実態が分からなくなる。 */
+  const jamRows = [...new Set(insp.log.map(d => d.row))];
+  const firstOf = r => insp.log.find(d => d.row === r);
+  const per100 = jamRows.length / Math.max(1, insp.passed) * 100;
+  console.log(`  到達 ${insp.depth}m / ${insp.passed} 層を通過 / 抜けられなかった層 ${jamRows.length}` +
+              ` (接触 ${insp.log.length} 回, 100層あたり ${per100.toFixed(1)} 層)`);
+  if (jamRows.length) {
     const byType = {}, byBand = {};
-    insp.log.forEach(d => {
+    jamRows.map(firstOf).forEach(d => {
       byType[d.type] = (byType[d.type] || 0) + 1;
       const band = Math.floor(d.depth / 100) * 100;
       byBand[band] = (byBand[band] || 0) + 1;
     });
     console.log('    地層別:', JSON.stringify(byType));
     console.log('    深度帯別:', JSON.stringify(byBand));
-    console.log('    最初の3件:', JSON.stringify(insp.log.slice(0, 3)));
+    console.log('    最初の3層:', JSON.stringify(jamRows.slice(0, 3).map(firstOf)));
   }
   check(`最深部まで通しても構造が破綻しない（${insp.depth}m まで確認）`, insp.depth >= 400);
-  check('詰まりが100層あたり2件未満', per100 < 2);
+  /* しきい値は audit と同じ。ここは自動操縦の腕も混ざる数字なので、
+     「明らかな崩壊」を捕まえる位置に置く（生成の厳しい検査は audit の静的検査）。 */
+  check(`抜けられない層が100層あたり5層未満（${per100.toFixed(1)}層）`, per100 < 5);
 
   /* ---- 地層の種類ごとに、本当に最後まで通れるか ----
      1種類だけを並べた縦坑を作り、自動操縦で潜らせる。
@@ -228,6 +334,162 @@ function installPilot() {
       st.alive && st.passed >= 3);
   }
   await page.evaluate(() => { BM.game.world.debugType = null; });
+
+  /* ---- 200m ごとのご褒美の間 ----
+     深さに終わりが無いので、ここが抜けると「潜る理由」が無くなる。
+     節目が1つでも欠けていないこと・そこでは絶対に死なないことを見る。 */
+  console.log('  --- ご褒美の間（200m ごと・底なし）---');
+  const MC = await page.evaluate(() => ({
+    rows: BM.MILESTONE_ROWS, bonus: BM.MILESTONE_BONUS, kinds: BM.REWARDS.length + 1,
+    shieldMax: BM.SHIELD_MAX, shieldCap: BM.SHIELD_CAP, maxPower: BM.MAX_POWER,
+    bigSpan: BM.BIG_SPAN, bonusCap: BM.MILESTONE_BONUS * BM.MILESTONE_BONUS_CAP
+  }));
+  const ms = await page.evaluate(() => {
+    const w = new BM.World(); w.reset();
+    // ensure() は1回で作る層数に上限があるので、少しずつ伸ばす
+    for (let r = 600; r <= 6000; r += 600) w.ensure(r);
+    const heads = w.layers.filter(l => l.reward).map(l => ({
+      depth: l.reward.depth, kind: l.kind.key, bonus: l.reward.bonus, row: l.row
+    }));
+    const rew = w.layers.filter(l => l.type === 'reward');
+    // 節目ごとに何枚開いているか
+    const span = {};
+    rew.forEach(l => { const m = Math.floor(l.row / BM.MILESTONE_ROWS); span[m] = (span[m] || 0) + 1; });
+    // 全マス空か（＝そこでは死ねない）
+    const notOpen = rew.filter(l => {
+      for (let c = BM.PLAY_L; c <= BM.PLAY_R; c++) if (l.cells[c] !== BM.T_EMPTY) return true;
+      return false;
+    }).length;
+    // 結晶が「落ちながら追える」間隔に並んでいるか
+    let coinTooFar = 0, coinPairs = 0;
+    rew.forEach(l => {
+      const coins = l.items.filter(i => i.type === 'COIN').sort((a, b) => a.row - b.row);
+      for (let i = 1; i < coins.length; i++) {
+        const drow = coins[i].row - coins[i - 1].row;
+        const reach = w.moveSpeed(l.row) * (drow * BM.TILE / w.vTerm(l.row)) / BM.TILE;
+        coinPairs++;
+        if (Math.abs(coins[i].col - coins[i - 1].col) > reach) coinTooFar++;
+      }
+    });
+    return { heads, span, notOpen, coinTooFar, coinPairs };
+  });
+  const miles = ms.heads.map(h => h.depth);
+  const wantMiles = [];
+  for (let m = MC.rows; m <= 6000 - MC.rows; m += MC.rows) wantMiles.push(m);
+  const missing = wantMiles.filter(m => miles.indexOf(m) < 0);
+  console.log(`  節目 ${miles.length} 個: ${miles.slice(0, 8).join(', ')} ... ${miles.slice(-2).join(', ')}`);
+  console.log('  中身:', JSON.stringify(ms.heads.slice(0, 10).map(h => h.depth + ':' + h.kind)));
+  check(`${MC.rows}m ごとに必ずご褒美がある（欠け ${missing.length} 個）`, missing.length === 0);
+  check('ご褒美の間は全マス空＝そこでは死なない', ms.notOpen === 0);
+  const kinds = new Set(ms.heads.map(h => h.kind));
+  check(`中身が${MC.kinds}種すべて出る（${[...kinds].join(',')}）`, kinds.size === MC.kinds);
+  const bigs = ms.heads.filter(h => h.kind === 'cavern').map(h => h.depth);
+  check(`1000m ごとが大空洞（${bigs.slice(0, 5).join(', ')}）`,
+    bigs.length > 0 && bigs.every(d => d % 1000 === 0));
+  check(`結晶が落ちながら追える間隔（${ms.coinPairs} 組中 ${ms.coinTooFar} 組が届かない）`, ms.coinTooFar === 0);
+  check('節目ごとにボーナスが増える',
+    ms.heads.length > 3 && ms.heads[1].bonus > ms.heads[0].bonus);
+
+  // 底なし＝どんなに深くても節目が来る
+  const deepMile = await page.evaluate(() => {
+    const w = new BM.World(); w.reset();
+    w.nextRow = 100000; w.lastRow = 100000; w.mileDone = Math.floor(100000 / BM.MILESTONE_ROWS);
+    w.ensure(100600);
+    const h = w.layers.filter(l => l.reward).map(l => ({ depth: l.reward.depth, kind: l.kind.key }));
+    return h;
+  });
+  console.log('  100,000m 付近:', JSON.stringify(deepMile));
+  check('10万m 付近でもご褒美が生成される（底なし）', deepMile.length >= 2);
+
+  // 実プレイで本当に効くか（爆弾が満タンになる・点が入る）
+  const grant = await page.evaluate(async () => {
+    const g = BM.game;
+    g.newRun(); BM.ui.hide();
+    g.noDeath = true;
+    g.player.bombs = 0;
+    // 200m の直前まで一気に落とす
+    const row = 200 - 4;
+    g.player.y = row * BM.TILE;
+    g.camY = g.player.y - BM.VIEW_H * 0.3;
+    g.world.reset();
+    g.world.nextRow = row - 12; g.world.lastRow = row - 12;
+    g.world.mileDone = 0;
+    g.world.ensure(row + 60);
+    const before = { bombs: g.player.bombs, score: g.score };
+    for (let i = 0; i < 900; i++) g.update(1 / 120);
+    g.noDeath = false;
+    return { before, bombs: g.player.bombs, score: g.score, depth: g.player.deepest,
+             gotToast: !!document.querySelector('#reward-toast .rw-name'),
+             toast: (document.querySelector('#reward-toast .rw-name') || {}).textContent || '' };
+  });
+  console.log(`  実プレイ: 爆弾 ${grant.before.bombs}→${grant.bombs} / 点 ${grant.before.score}→${grant.score}` +
+              ` / ${grant.depth}m / トースト「${grant.toast}」`);
+  check('ご褒美を通ると実際に補給される', grant.bombs > grant.before.bombs);
+  check(`到達ボーナス ${MC.bonus} が入る`, grant.score >= grant.before.score + MC.bonus);
+  check('もらった内容が画面に出る', grant.gotToast);
+
+  /* ---- 10000m ごとの別格「地核の間」 ----
+     4種＋大空洞の巡回だけだと 2000m と 20000m で質的な違いが無くなる。
+     ここだけは通常の上限を超えるので、超えたことが本当に効いているかを見る。 */
+  const EP = await page.evaluate(() => {
+    const w = new BM.World(); w.reset();
+    const at = d => {
+      const m = d / BM.MILESTONE_ROWS;
+      return { depth: d, key: w.rewardAt(m).key, span: w.rewardSpan(m), bonus: w.rewardBonus(m) };
+    };
+    const list = [1000, 5000, 9800, 10000, 10200, 20000, 30000, 50000, 100000].map(at);
+    // 実際に 20000m を生成して中身を数える
+    const start = 19600;
+    w.nextRow = start; w.lastRow = start; w.mileDone = start / BM.MILESTONE_ROWS;
+    for (let x = start + 200; x <= start + 900; x += 200) w.ensure(x);
+    const ch = w.layers.filter(l => l.type === 'reward' && Math.floor(l.row / BM.MILESTONE_ROWS) === 100);
+    const inv = {};
+    ch.forEach(l => l.items.forEach(i => { inv[i.type] = (inv[i.type] || 0) + 1; }));
+    return { list, inv, layers: ch.length, open: ch.length ? ch[ch.length - 1].row - ch[0].row : 0 };
+  });
+  console.log('  --- 10000m ごとの別格 ---');
+  EP.list.forEach(x => console.log(`  ${String(x.depth).padStart(6)}m  ${x.key.padEnd(7)} ${x.span}層  +${x.bonus.toLocaleString('en-US')}`));
+  console.log(`  20000m の中身: ${JSON.stringify(EP.inv)} / 開けた区間 ${EP.layers}層 ${EP.open}行`);
+  const epics = EP.list.filter(x => x.depth % 10000 === 0);
+  check('10000m ごとが「地核の間」', epics.length > 0 && epics.every(x => x.key === 'core'));
+  check('10000m 以外は地核の間にならない', EP.list.filter(x => x.depth % 10000 !== 0).every(x => x.key !== 'core'));
+  check(`別格は開ける区間が長い（${epics[0].span}層 > 大空洞 ${MC.bigSpan}層）`, epics.every(x => x.span > MC.bigSpan));
+  check(`別格のボーナスは通常の上限 ${MC.bonusCap.toLocaleString('en-US')} を超える（+${epics[0].bonus.toLocaleString('en-US')}）`,
+    epics[0].bonus > MC.bonusCap);
+
+  // 上限突破が実際に効くか。ここが飾りだと「別格」の意味が無い
+  const over = await page.evaluate(async () => {
+    const g = BM.game;
+    g.newRun(); BM.ui.hide(); g.noDeath = true;
+    const row = 10000 - 4;
+    g.player.y = row * BM.TILE; g.player.deepest = row;
+    g.player.shield = 0; g.player.power = BM.BOMB_POWER; g.player.bombs = 1;
+    g.camY = g.player.y - BM.VIEW_H * 0.3;
+    g.world.reset();
+    g.world.nextRow = row - 12; g.world.lastRow = row - 12;
+    g.world.mileDone = Math.floor(10000 / BM.MILESTONE_ROWS) - 1;
+    g.world.ensure(row + 120);
+    const before = { shield: g.player.shield, power: g.player.power, score: g.score };
+    for (let i = 0; i < 1200; i++) g.update(1 / 120);
+    const mid = { shield: g.player.shield, power: g.player.power, score: g.score };
+    // 上限突破ぶんを持った状態で 🛡 を拾っても減らないこと
+    g.player.shield = BM.SHIELD_CAP;
+    const l = g.world.layers.find(x => x.items && x.items.length) || g.world.layers[0];
+    g.player.y = BM.centerY(BM.rowOf(g.player.y));
+    l.items.push({ col: BM.colOf(g.player.x), row: BM.rowOf(g.player.y), type: 'SHIELD', t: 0, alive: true });
+    g.checkItems();
+    g.noDeath = false;
+    return { before, mid, afterPickup: g.player.shield,
+             toast: (document.querySelector('#reward-toast .rw-name') || {}).textContent || '',
+             pips: [...document.querySelectorAll('#shield-pips .pip')]
+               .filter(p => p.classList.contains('on') && getComputedStyle(p).visibility !== 'hidden').length };
+  });
+  console.log(`  10000m 通過: シールド ${over.before.shield}→${over.mid.shield} / 爆風 ${over.before.power}→${over.mid.power}` +
+              ` / 点 +${(over.mid.score - over.before.score).toLocaleString('en-US')} / トースト「${over.toast}」`);
+  check(`シールドが通常の上限(${MC.shieldMax})を超える（${over.mid.shield}枚）`, over.mid.shield > MC.shieldMax);
+  check(`爆風が最大(${MC.maxPower})になる`, over.mid.power === MC.maxPower);
+  check(`HUD に上限突破ぶんが出る（${over.pips}個点灯）`, over.pips === over.mid.shield);
+  check('上限突破ぶんを持って🛡を拾っても減らない', over.afterPickup >= MC.shieldCap);
 
   /* ---- 隙間の作り方が一通り出てくるか ---- */
   const seen = await page.evaluate(() => {
@@ -328,6 +590,164 @@ function installPilot() {
     BM.ui.syncHud(BM.game);
     return document.querySelectorAll('#shield-pips .pip.on').length === 2;
   }));
+
+  /* ---- 常設の状態表示（爆風・スロー・結晶の倍率） ----
+     持っているのに画面のどこにも無い＝プレイヤーには存在しないのと同じ。
+     シールドで一度やった失敗なので、残りの3つも同じ基準で見る。
+     canvas の中身は読めないので、表示に使う値そのものと、
+     「値を変えたら絵が変わること」の両方を確かめる。 */
+  const stat = await page.evaluate(() => {
+    const g = BM.game;
+    g.newRun(); BM.ui.hide();
+    const idle = g.statusRows().map(r => r.key);
+    g.player.power = 4;
+    g.player.slow = g.player.slowMax = 6;
+    g.coinRun = 3; g.coinRunT = 1.2;
+    const on = g.statusRows();
+    // 残り 0.5 秒あたりまで進める。ちょうど境界（残り1.0秒）で測ると
+    // 浮動小数の誤差で点滅する/しないが揺れて、検査にならない
+    for (let i = 0; i < 660; i++) g.update(1 / 120);
+    const late = g.statusRows();
+    g.player.power = BM.MAX_POWER;
+    const full = g.statusRows().find(r => r.key === 'power');
+    for (let i = 0; i < 240; i++) g.update(1 / 120);   // 確実に切らす
+    const after = g.statusRows().map(r => r.key);
+    return {
+      idle, after,
+      keys: on.map(r => r.key),
+      power: on.find(r => r.key === 'power'),
+      slow: on.find(r => r.key === 'slow'),
+      coin: on.find(r => r.key === 'coin'),
+      slowLate: late.find(r => r.key === 'slow'),
+      full: { text: full.text, full: full.full }
+    };
+  });
+  console.log('  --- 常設の状態表示 ---');
+  console.log(`  何も無い時: ${JSON.stringify(stat.idle)} / 付与後: ${JSON.stringify(stat.keys)}` +
+              ` / スロー切れ後: ${JSON.stringify(stat.after)}`);
+  console.log(`  爆風 ${stat.power.text} / スロー ${stat.slow.text}→${stat.slowLate.text}` +
+              `${stat.slowLate.warn ? '(点滅)' : ''} / 結晶 ${stat.coin.text}`);
+  check('爆風は常に画面に出ている', stat.idle.indexOf('power') >= 0 && stat.power.text === '4/6');
+  check('爆風が最大だと最大と分かる', stat.full.text === '6/6' && stat.full.full === true);
+  check('スローは持っている間だけ出る',
+    stat.idle.indexOf('slow') < 0 && stat.keys.indexOf('slow') >= 0 && stat.after.indexOf('slow') < 0);
+  check(`スローの残り時間が減る（${stat.slow.text} → ${stat.slowLate.text}）`,
+    stat.slowLate.value < stat.slow.value && stat.slowLate.frac < stat.slow.frac);
+  check(`切れる直前に点滅する（残り ${stat.slowLate.text}）`, stat.slowLate.warn === true);
+  check('結晶の倍率は連続中だけ出る',
+    stat.idle.indexOf('coin') < 0 && stat.coin.text === '×3');
+
+  // 値が本当に絵に反映されているか（左上の描画量を比べる）
+  const drawn = await page.evaluate(() => {
+    const g = BM.game, ctx = document.getElementById('game').getContext('2d');
+    const sum = () => {
+      const d = ctx.getImageData(8, 8, 150, 70).data;
+      let n = 0;
+      for (let i = 0; i < d.length; i += 4) n += d[i] + d[i + 1] + d[i + 2];
+      return n;
+    };
+    g.newRun(); BM.ui.hide(); g.noDeath = false;
+    g.player.power = 2; g.player.slow = 0; g.coinRun = 0; g.render();
+    const a = sum();
+    g.player.power = BM.MAX_POWER; g.render();
+    const b = sum();
+    g.player.slow = g.player.slowMax = 5; g.coinRun = 4; g.coinRunT = 1.2; g.render();
+    const c = sum();
+    // スロー中は周辺が紫に振れる（数字だけでなく世界の見た目でも分かる）
+    const corner = () => { const d = ctx.getImageData(4, BM.VIEW_H - 8, 4, 4).data; return [d[0], d[2]]; };
+    g.player.slow = 0; g.render(); const cold = corner();
+    g.player.slow = g.player.slowMax = 5; g.render(); const warm = corner();
+    return { a, b, c, cold, warm };
+  });
+  console.log(`  左上の描画量: 爆風2 ${drawn.a} → 爆風6 ${drawn.b} → 全部 ${drawn.c}`);
+  check('表示は値によって絵が変わる（＝本当に描かれている）', drawn.a !== drawn.b && drawn.c > drawn.b);
+  check(`スロー中は画面の縁が紫に振れる（青 ${drawn.cold[1]}→${drawn.warm[1]}）`,
+    drawn.warm[1] > drawn.cold[1]);
+
+  /* ---- 演出を抑える設定 ----
+     画面揺れ・全画面フラッシュ・RGBずれは、人によっては本当に遊べなくなる。
+     OS の設定を既定として尊重できているか、手動でも切り替わるか、
+     そして「抑えたのに実際は出ている」ことがないかを見る。 */
+  console.log('  --- 演出を抑える設定 ---');
+  {
+    const blast = () => {
+      const g = BM.game;
+      g.newRun(); BM.ui.hide();
+      g.fx.clear();
+      g.blast(7, BM.rowOf(g.player.y) + 4, 3, false);
+      return { shake: g.fx.shake, flash: g.fx.flash, ab: g.fx.aberration,
+               parts: g.fx.particles.length, reduced: BM.a11y.reduced };
+    };
+    // 通常（対照）
+    const normal = await page.evaluate(bl => { BM.a11y.set(false); return eval('(' + bl + ')')(); }, blast.toString());
+    // 手動で抑える
+    const off = await page.evaluate(bl => { BM.a11y.set(true); return eval('(' + bl + ')')(); }, blast.toString());
+    console.log(`  通常  : 揺れ ${normal.shake.toFixed(1)} / フラッシュ ${normal.flash.toFixed(2)}` +
+                ` / 色ずれ ${normal.ab.toFixed(1)} / 破片 ${normal.parts}`);
+    console.log(`  抑える: 揺れ ${off.shake.toFixed(1)} / フラッシュ ${off.flash.toFixed(2)}` +
+                ` / 色ずれ ${off.ab.toFixed(1)} / 破片 ${off.parts}`);
+    check('通常は揺れ・フラッシュ・色ずれが出る（対照）',
+      normal.shake > 0 && normal.flash > 0 && normal.ab > 0);
+    check('抑えると画面が揺れない', off.shake === 0);
+    check('抑えると色ずれが出ない', off.ab === 0);
+    check(`抑えるとフラッシュが弱くなる（${normal.flash.toFixed(2)} → ${off.flash.toFixed(2)}）`,
+      off.flash > 0 && off.flash < normal.flash * 0.4);
+    check(`抑えると破片が減る（${normal.parts} → ${off.parts}）`, off.parts < normal.parts);
+
+    // CSS 側（動きと点滅）も止まっているか
+    const css = await page.evaluate(() => {
+      const out = {};
+      out.cls = document.documentElement.classList.contains('reduce-motion');
+      const b = document.getElementById('combo-banner');
+      b.classList.add('show');
+      out.banner = getComputedStyle(b).animationName;
+      const t = document.getElementById('reward-toast');
+      t.classList.add('show');
+      out.toast = getComputedStyle(t).animationName;
+      const v = document.getElementById('hud-score');
+      v.classList.add('warn');
+      out.warn = getComputedStyle(v).animationName;
+      v.classList.remove('warn');
+      return out;
+    });
+    console.log(`  CSS: クラス ${css.cls} / バナー ${css.banner} / トースト ${css.toast} / 点滅 ${css.warn}`);
+    check('抑えると html に reduce-motion が付く', css.cls === true);
+    check('抑えると弾むアニメが淡いフェードに変わる',
+      css.banner === 'rmFade' && css.toast === 'rmFade');
+    check('抑えると点滅が止まる', css.warn === 'none');
+
+    // 設定が残るか／OS の設定を既定にできているか
+    const persist = await page.evaluate(() => {
+      BM.a11y.set(true);
+      const saved = BM.store.get(BM.a11y.KEY, null);
+      // 保存を消すと OS の設定に従う
+      try { window.localStorage.removeItem(BM.a11y.KEY); } catch (e) { /* noop */ }
+      return { saved, pref: BM.a11y.pref(), applied: BM.a11y.apply(), os: BM.a11y.osReduced() };
+    });
+    console.log(`  保存 ${JSON.stringify(persist.saved)} / 未保存なら OS の設定 ${persist.os} を使う → ${persist.applied}`);
+    check('設定が保存される', persist.saved === '1');
+    check('未保存なら OS の設定に従う', persist.pref === null && persist.applied === persist.os);
+
+    // OS 側が reduce の環境で、最初から抑えた状態で始まるか
+    const ctx = await browser.newContext({ reducedMotion: 'reduce', viewport: { width: 700, height: 800 } });
+    const p2 = await ctx.newPage();
+    await p2.goto(`http://localhost:${PORT}/index.html?noads=1`);
+    await p2.waitForTimeout(400);
+    const osFirst = await p2.evaluate(() => ({
+      reduced: BM.a11y.reduced,
+      cls: document.documentElement.classList.contains('reduce-motion'),
+      pref: BM.a11y.pref()
+    }));
+    console.log(`  OS が reduce の環境: 抑制 ${osFirst.reduced} / クラス ${osFirst.cls} / 保存 ${osFirst.pref}`);
+    check('OS の「視差を減らす」を既定として尊重する',
+      osFirst.reduced === true && osFirst.cls === true && osFirst.pref === null);
+    // OS が reduce でも、手動で「出す」を選べる
+    const manualOn = await p2.evaluate(() => { BM.a11y.set(false); return BM.a11y.reduced; });
+    check('OS が reduce でも手動で出す側に戻せる', manualOn === false);
+    await ctx.close();
+
+    await page.evaluate(() => { BM.a11y.set(false); });
+  }
 
   /* ---- 爆弾で掘れること ---- */
   const dug = await page.evaluate(() => {

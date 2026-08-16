@@ -14,7 +14,10 @@
 }
 
 *{box-sizing:border-box}
-html,body{height:100%}
+html{height:100%}
+/* body は min-height。中身が画面より高くなったら body ごと伸びるので、
+   はみ出した上端も残らずスクロールで届く。 */
+body{min-height:100%}
 body{
   margin:0;
   background:
@@ -24,14 +27,25 @@ body{
   color:var(--ink);
   font-family:"Segoe UI","Hiragino Kaku Gothic ProN","Noto Sans JP",system-ui,sans-serif;
   display:flex;
-  align-items:center;
+  /* center ではなく flex-start ＋ margin:auto。
+     中身が画面より縦に長くなった時、center だと上にはみ出した分が
+     スクロールしても出てこない（HUD のラベル行が切れる）。 */
+  align-items:flex-start;
   justify-content:center;
   padding:12px;
   overflow-x:hidden;
 }
 
 #app{
-  width:min(640px,100%);
+  /* 横 640px と、画面の高さから HUD・凡例の分を引いた幅の小さい方。
+     0.9375 は canvas の 600/640（幅÷高さ）。これで縦にも必ず収まる。 */
+  /* 下限 520px は HUD が1行に収まる幅（セル 438 ＋ 隙間 40 ＋ 内外の余白 34、
+     シールドは上限突破の5枚ぶんを確保した幅）。
+     ここを削って HUD を2行に折り返させても、増える高さは同じくらいなので
+     得が無い。画面が低い時は縦にスクロールさせる。 */
+  width:min(640px, 100%, max(520px, calc((100dvh - 150px) * 0.9375)));
+  min-width:0;
+  margin:auto;
   display:flex;
   flex-direction:column;
   gap:10px;
@@ -40,6 +54,8 @@ body{
 /* ---------- HUD ---------- */
 #hud{
   display:flex;
+  /* どうしても1行に入らない幅の時は、重ねるのではなく折り返す */
+  flex-wrap:wrap;
   gap:10px;
   background:linear-gradient(180deg,#1d1430,#130d20);
   border:1px solid var(--line);
@@ -61,17 +77,21 @@ body{
   text-shadow:0 0 12px rgba(255,210,61,.35);
 }
 .hud-small{font-size:14px;white-space:nowrap}
+/* 桁が増えた時の縮小。枠を広げる代わりに字を小さくする */
+.hud-value.long{font-size:15px}
+.hud-value.longer{font-size:13px}
 .hud-value.warn{color:var(--hot);animation:pulse .6s infinite}
 .hud-value.bump{animation:bump .25s ease-out}
 @keyframes pulse{50%{opacity:.35}}
 @keyframes bump{0%{transform:scale(1.5);color:var(--hot2)}100%{transform:scale(1)}}
 
 /* ---------- 爆弾の残数 ---------- */
-.hud-ammo{align-items:flex-end}
+/* 最大9個のピップと数値が隣のセルへはみ出さない幅を確保しておく */
+.hud-ammo{align-items:flex-end;min-width:128px}
 .ammo-row{display:flex;align-items:center;gap:8px}
-.pips{display:flex;gap:3px}
+.pips{display:flex;gap:2px}
 .pip{
-  width:8px;height:8px;border-radius:50%;
+  width:7px;height:7px;border-radius:50%;
   border:1px solid #4a3a6b;
   background:#1a1230;
   transition:background .12s ease, box-shadow .12s ease;
@@ -85,7 +105,7 @@ body{
   font-size:19px;font-weight:800;line-height:1;
   font-variant-numeric:tabular-nums;
   color:#ffd9a8;
-  min-width:44px;text-align:right;
+  min-width:38px;text-align:right;
 }
 .ammo-count i{font-style:normal;font-size:11px;opacity:.5;font-weight:600}
 .hud-ammo.empty .ammo-count{color:var(--hot);animation:pulse .5s infinite}
@@ -96,8 +116,9 @@ body{
 }
 .tbtn.big{position:relative}
 
-/* シールド。持っているかどうかが常に見えていないと存在を忘れる */
-.hud-shield{min-width:56px}
+/* シールド。持っているかどうかが常に見えていないと存在を忘れる。
+   幅は上限突破の5枚ぶん（11px×5 ＋ 隙間2px×4）を最初から確保しておく */
+.hud-shield{min-width:66px}
 .hud-shield .pips{padding-top:4px}
 .pip.sh{width:11px;height:11px;border-radius:3px;transform:rotate(45deg)}
 .pip.sh.on{
@@ -106,6 +127,15 @@ body{
   box-shadow:0 0 9px rgba(140,232,255,.9);
 }
 .hud-shield.none{opacity:.4}
+/* 上限突破ぶん。場所は常に取っておき、持っている時だけ見せる。
+   持った瞬間に幅が変わると、隣の数値まで動いて読めなくなる。 */
+.pip.sh.extra{visibility:hidden}
+.hud-shield.over .pip.sh.extra{visibility:visible}
+.hud-shield.over .pip.sh.extra.on{
+  background:radial-gradient(circle at 35% 30%,#fff0fb,#ff7ac8 55%,#a8318a);
+  border-color:#ffc4ec;
+  box-shadow:0 0 11px rgba(255,122,200,.95);
+}
 .hud-shield.fire .pips{animation:shFire .5s ease-out}
 @keyframes shFire{
   0%{transform:scale(1.6);filter:brightness(2.2)}
@@ -261,6 +291,49 @@ canvas#game{
   100%{opacity:0;transform:translate(-50%,-90%) scale(.9)}
 }
 
+/* ---------- ご褒美の間（200m ごと） ----------
+   何をもらったのかが文字で残らないと、ただ光っただけで終わってしまう。 */
+#reward-toast{
+  /* 上のほうに置く。中央だとプレイヤー自身と、22% にある
+     コンボ/地層バナーの両方に重なって読めない */
+  position:absolute;left:50%;top:12%;
+  transform:translate(-50%,-50%);
+  min-width:236px;max-width:82%;
+  padding:13px 20px 14px;
+  border-radius:12px;
+  border:1px solid var(--rw,#ffe066);
+  background:linear-gradient(180deg,rgba(24,17,40,.94),rgba(12,8,22,.94));
+  box-shadow:0 10px 40px rgba(0,0,0,.6), 0 0 26px -6px var(--rw,#ffe066);
+  text-align:center;
+  /* #stage-wrap が line-height:0（canvas の余白を消すため）なので、
+     指定しないと行が全部重なって読めない */
+  line-height:1.35;
+  opacity:0;pointer-events:none;
+}
+#reward-toast .rw-name{
+  font-size:20px;font-weight:900;line-height:1.25;letter-spacing:.04em;color:var(--rw,#ffe066);
+  text-shadow:0 0 16px var(--rw,#ffe066);
+}
+#reward-toast .rw-depth{font-size:11px;font-weight:800;letter-spacing:.16em;color:var(--dim);margin-bottom:2px}
+#reward-toast .rw-got{
+  display:flex;flex-wrap:wrap;gap:4px 6px;justify-content:center;margin-top:8px;
+}
+#reward-toast .rw-got span{
+  font-size:12px;font-weight:700;color:#f4ecff;
+  border:1px solid rgba(255,255,255,.22);
+  background:rgba(255,255,255,.06);
+  border-radius:999px;padding:2px 9px;
+}
+#reward-toast .rw-bonus{font-size:13px;font-weight:800;color:#ffd23d;margin-top:7px}
+#reward-toast.show{animation:rwPop 2.6s cubic-bezier(.16,1.1,.3,1) forwards}
+@keyframes rwPop{
+  0%{opacity:0;transform:translate(-50%,-50%) scale(.7)}
+  10%{opacity:1;transform:translate(-50%,-50%) scale(1.04)}
+  18%{transform:translate(-50%,-50%) scale(1)}
+  80%{opacity:1}
+  100%{opacity:0;transform:translate(-50%,-72%) scale(.96)}
+}
+
 /* ---------- touch ---------- */
 /* 落ちるゲームなので上入力が無い。横・急降下・爆弾の3つだけを大きく置く */
 #touch{display:none;justify-content:center;align-items:center;gap:10px;padding:4px 2px}
@@ -275,7 +348,6 @@ canvas#game{
 }
 .tbtn.big{width:76px;height:76px;font-size:30px;border-color:var(--hot)}
 .tbtn:active{background:#3d2a63;transform:scale(.94)}
-@media (hover:none) and (pointer:coarse){ #touch{display:flex} #legend{display:none} }
 
 /* ---------- legend ---------- */
 #legend{
@@ -283,6 +355,129 @@ canvas#game{
   font-size:11px;color:var(--dim);
 }
 #legend b{color:#ffe9a8;font-weight:700}
+
+/* 指で触る端末では、操作ボタンを出してキーの凡例を隠す。
+   この指定は #legend / #touch の定義より後に置かないと効かない
+   （同じ詳細度なので、後に書いたほうが勝つ）。
+   実際、以前はこれが #legend の定義より前にあり、スマホでキーの凡例が
+   出たままになっていた。狭い画面で縦を食うので、ただの害だった。 */
+@media (hover:none) and (pointer:coarse){
+  #touch{display:flex}
+  #legend{display:none}
+}
+
+/* ---------- 横持ちの案内 ----------
+   縦坑は縦に長いので、低い画面には物理的に入らない。
+   横持ちの実機（高さ 480px 以下）では 520px 幅の盤面が 555px の高さになり、
+   スクロールしないと下が見えない。見えないまま落ちるのが一番まずいので、
+   小さく縮めるのではなく縦に持ち替えてもらう。 */
+#rotate{display:none}
+@media (hover:none) and (pointer:coarse) and (orientation:landscape) and (max-height:480px){
+  #rotate{
+    display:flex;
+    position:fixed;inset:0;z-index:50;
+    align-items:center;justify-content:center;
+    background:rgba(8,5,15,.94);
+    backdrop-filter:blur(4px);
+    text-align:center;
+  }
+  .rot-box{padding:18px 22px}
+  .rot-icon{font-size:40px;transform:rotate(90deg);line-height:1.2}
+  .rot-title{font-size:19px;font-weight:800;margin-top:10px;color:var(--hot2)}
+  .rot-sub{font-size:12.5px;line-height:1.7;color:var(--dim);margin-top:8px}
+}
+.reduce-motion .rot-icon{transform:none}
+
+/* ---------- 演出を抑える設定 ----------
+   クラスは JS（BM.a11y）が付ける。OS の prefers-reduced-motion を既定にしつつ、
+   OS 設定を変えられない人が手動でも切り替えられるようにするため、
+   メディアクエリではなくクラスで一元管理している。
+
+   ここで止めるのは「動き」と「点滅」。色や配置は変えない。
+   レイアウトまで変えると、抑えた人だけ別の画面を見ることになる。 */
+.reduce-motion #combo-banner.show,
+.reduce-motion #reward-toast.show{
+  animation:none;
+  opacity:1;
+}
+/* 動かさない代わりに、出て消えるだけにする */
+.reduce-motion #combo-banner.show{ animation:rmFade 1.2s linear forwards; transform:translate(-50%,-50%) }
+.reduce-motion #reward-toast.show{ animation:rmFade 2.6s linear forwards; transform:translate(-50%,-50%) }
+@keyframes rmFade{ 0%{opacity:0} 6%{opacity:1} 88%{opacity:1} 100%{opacity:0} }
+
+/* 点滅をやめる。低残弾や記録更新は色だけで示す */
+.reduce-motion .hud-value.warn,
+.reduce-motion .hud-ammo.empty .ammo-count,
+.reduce-motion .blink{ animation:none; opacity:1 }
+/* 拡大縮小をやめる */
+.reduce-motion .hud-value.bump,
+.reduce-motion .hud-ammo.bump .ammo-count,
+.reduce-motion .hud-shield.fire .pips{ animation:none; transform:none; filter:none }
+.reduce-motion .menu button:active{ transform:none }
+.reduce-motion .ad-creative{ transition:none }
+
+/* ---------- 端末チェック ----------
+   実機の狭い画面で、指で触って結果を残せることが目的。
+   盤面の中に収まるので、パネル自体をスクロールさせる。 */
+.panel.dev{
+  max-width:96%;
+  max-height:100%;
+  overflow-y:auto;
+  -webkit-overflow-scrolling:touch;
+  padding:14px 14px 18px;
+  text-align:left;
+}
+.dev-wrap{font-size:12px}
+.dev-sec{
+  font-size:10px;font-weight:800;letter-spacing:.12em;
+  color:var(--dim);margin:12px 0 5px;
+}
+.dev-sec small{font-weight:600;letter-spacing:0;opacity:.8}
+.dev-list{display:flex;flex-direction:column;gap:3px}
+.dev-row{
+  display:flex;align-items:center;gap:7px;
+  background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.07);
+  border-radius:8px;padding:5px 8px;
+}
+.dev-mark{
+  flex:0 0 auto;width:16px;text-align:center;
+  font-weight:800;color:var(--dim);
+}
+.dev-mark.ok{color:#8affd0}
+.dev-mark.ng{color:var(--hot)}
+.dev-q{flex:1;line-height:1.4}
+.dev-got{
+  flex:0 0 auto;display:flex;gap:4px;align-items:center;
+  font-size:11px;font-weight:700;color:var(--dim);
+  font-variant-numeric:tabular-nums;
+}
+/* 44px 以上。ゲームの操作ボタンにその基準を課しているのだから、
+   この画面のボタンが小さいのは筋が通らない */
+.dev-btn{
+  font:inherit;font-weight:800;font-size:14px;
+  min-width:44px;min-height:44px;
+  color:var(--ink);
+  background:linear-gradient(180deg,#2a1c45,#1a1130);
+  border:1px solid #402f66;border-radius:8px;
+  cursor:pointer;
+}
+.dev-btn.on{border-color:#8affd0;color:#8affd0}
+.dev-btn.on.ng{border-color:var(--hot);color:var(--hot)}
+.dev-info{
+  font-size:11px;line-height:1.7;color:var(--dim);
+  background:rgba(255,255,255,.04);
+  border:1px solid rgba(255,255,255,.07);
+  border-radius:8px;padding:7px 9px;
+}
+.dev-ua{font-size:9.5px;opacity:.7;word-break:break-all}
+.dev-note{font-size:11.5px;color:#ffe9a8;margin-top:8px;line-height:1.6}
+.dev-out{
+  width:100%;height:120px;margin-top:6px;
+  font:11px/1.5 ui-monospace,monospace;
+  color:var(--ink);background:#120c20;
+  border:1px solid #402f66;border-radius:8px;padding:6px;
+}
 </style>
 <div id="app">
 
@@ -320,6 +515,7 @@ canvas#game{
     </div>
 
     <div id="combo-banner"></div>
+    <div id="reward-toast"></div>
   </div>
 
   <div id="touch" aria-hidden="true">
@@ -333,9 +529,19 @@ canvas#game{
     <span><b>← →</b> 横移動</span>
     <span><b>↓</b> 急降下</span>
     <span><b>Space</b> 爆弾を落とす</span>
-    <span><b>P</b> ポーズ / <b>M</b> 音楽 / <b>N</b> 効果音</span>
+    <span><b>P</b> ポーズ / <b>M</b> 音楽 / <b>N</b> 効果音 / <b>R</b> 演出を抑える</span>
   </footer>
 
+</div>
+
+<!-- 横持ちの端末向け。低い画面には縦坑が入らないので、素直に縦にしてもらう。
+     覆っている間はゲームを止める（見えないまま落ちて死ぬのが一番まずい）。 -->
+<div id="rotate" role="alertdialog" aria-live="polite">
+  <div class="rot-box">
+    <div class="rot-icon">📱</div>
+    <div class="rot-title">画面を縦にしてください</div>
+    <div class="rot-sub">横持ちだと縦坑が画面に入りません。<br>縦に戻すと続きから再開できます。</div>
+  </div>
 </div>
 
 <script>
@@ -396,6 +602,8 @@ BM.CHAIN_DELAY   = 0.055;
 
 /* ---------- シールド ---------- */
 BM.SHIELD_MAX    = 3;
+// 通常はここまで。10000m ごとの「地核の間」だけがこの上限を超えさせる
+BM.SHIELD_CAP    = 5;
 BM.SHIELD_POWER  = 3;    // 発動時に開ける穴（通常の爆弾より大きい）
 BM.SHIELD_IFRAME = 0.7;  // 発動直後の無敵。厚い層で複数枚消費するのを防ぐ
 
@@ -423,8 +631,47 @@ BM.ITEMS = {
   BOMB:   { key: 'BOMB',   label: '爆弾 +1',   glyph: '💣', color: '#ffd9a8' },
   POWER:  { key: 'POWER',  label: '爆風アップ', glyph: '🔥', color: '#ff8a4c' },
   SHIELD: { key: 'SHIELD', label: 'シールド',   glyph: '🛡', color: '#8ce8ff' },
-  SLOW:   { key: 'SLOW',   label: 'スロー',     glyph: '🌀', color: '#c9a6ff' }
+  SLOW:   { key: 'SLOW',   label: 'スロー',     glyph: '🌀', color: '#c9a6ff' },
+  COIN:   { key: 'COIN',   label: '結晶',       glyph: '💠', color: '#ffe066' }
 };
+
+/* ---------- ご褒美の間（200m ごと・底なしで無限に続く） ----------
+   400m から先は難易度カーブが飽和して、構造としては同じものの繰り返しになる。
+   それだけだと深く潜る理由が無くなるので、200m ごとに必ず開けた空間を置いて
+   息をつかせ、確実な見返りを渡す。深さに終わりは無いので、
+   中身は4種を巡回させ、1000m ごとに全部盛りの大空洞にする。 */
+BM.MILESTONE_ROWS = 200;   // 何m ごとにご褒美を置くか
+BM.REWARD_SPAN    = 3;     // 開けたままにする層の数（この間は岩が無い）
+BM.BIG_EVERY      = 5;     // 何回ごとに大空洞にするか（5 → 1000m ごと）
+BM.BIG_SPAN       = 5;
+BM.EPIC_EVERY     = 50;    // 何回ごとに別格にするか（50 → 10000m ごと）
+BM.EPIC_SPAN      = 10;
+BM.MILESTONE_BONUS = 500;  // 到達ボーナス。節目ごとに増える
+BM.MILESTONE_BONUS_CAP = 20;  // 増え続けると点が壊れるので、この節目で止める
+// 別格だけは上限を高く取る。ここが「深く潜り続けた見返り」になる
+BM.EPIC_BONUS_CAP = 200;
+BM.COIN_SCORE     = 120;   // 結晶1個の点
+
+/* 中身のレパートリー。巡回するので、どこまで潜っても次のご褒美が来る */
+BM.REWARDS = [
+  { key: 'supply', name: '補給の間',  color: '#ffd9a8',
+    desc: '爆弾を満タンに', bombsFull: true, items: ['BOMB', 'BOMB'], coins: 3 },
+  { key: 'trove',  name: '宝物庫',    color: '#ffe066',
+    desc: '結晶をかき集めろ', coins: 12 },
+  { key: 'relic',  name: '遺物の間',  color: '#8ce8ff',
+    desc: 'シールドと爆風', items: ['SHIELD', 'POWER'], coins: 3 },
+  { key: 'tail',   name: '追い風の間', color: '#c9a6ff',
+    desc: '落下がゆるむ', slow: 6, bombs: 2, items: ['SLOW'], coins: 5 }
+];
+BM.REWARD_BIG = { key: 'cavern', name: '大空洞', color: '#8affd0',
+  desc: '全部持っていけ', bombsFull: true, shield: 1,
+  items: ['SHIELD', 'POWER', 'BOMB'], coins: 18 };
+
+/* 10000m ごとの別格。ここだけは通常の上限を超える。
+   4種＋大空洞の巡回だけだと、2000m と 20000m で質的な違いが無くなる。 */
+BM.REWARD_EPIC = { key: 'core', name: '地核の間', color: '#ff7ac8',
+  desc: '限界を一枚超える', bombsFull: true, shieldFull: true, powerFull: true,
+  items: ['SHIELD', 'POWER', 'BOMB', 'BOMB'], coins: 40 };
 
 /* ---------- 保存 ---------- */
 BM.store = {
@@ -436,6 +683,57 @@ BM.store = {
   },
   set: function (k, v) {
     try { window.localStorage.setItem(k, v); } catch (e) { /* 保存できなくても遊べる */ }
+  }
+};
+
+/* ---------- 演出を抑える設定 ----------
+   このゲームは画面揺れ・全画面フラッシュ・RGBずれを使っている。
+   これは人によっては本当に遊べなくなる（前庭系の症状・光感受性）。
+   OS の「視差を減らす」設定を既定として尊重し、そのうえで
+   OS の設定を変えられない人のために手動でも切り替えられるようにする。
+
+   保存は3状態：未保存＝OSまかせ / '1'＝常に抑える / '0'＝常に出す。 */
+BM.a11y = {
+  reduced: false,
+  KEY: 'deepfall.reduce',
+
+  osReduced: function () {
+    try {
+      return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    } catch (e) { return false; }
+  },
+
+  pref: function () {
+    var v = BM.store.get(this.KEY, null);
+    return v === '1' ? true : (v === '0' ? false : null);
+  },
+
+  /* 抑えるかどうかを決めて反映する。CSS 側はこのクラスだけを見る */
+  apply: function () {
+    var p = this.pref();
+    this.reduced = (p === null) ? this.osReduced() : p;
+    try {
+      document.documentElement.classList.toggle('reduce-motion', this.reduced);
+    } catch (e) { /* DOM 前でも落ちないように */ }
+    return this.reduced;
+  },
+
+  set: function (v) {
+    BM.store.set(this.KEY, v ? '1' : '0');
+    return this.apply();
+  },
+
+  toggle: function () { return this.set(!this.reduced); },
+
+  /* OS 側の設定変更に追従する（手動で決めている時は触らない） */
+  watch: function () {
+    var self = this;
+    try {
+      var mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+      var on = function () { if (self.pref() === null) self.apply(); };
+      if (mq.addEventListener) mq.addEventListener('change', on);
+      else if (mq.addListener) mq.addListener(on);
+    } catch (e) { /* 対応していない環境ではOSの初期値だけ見る */ }
   }
 };
 
@@ -664,6 +962,28 @@ BM.DIRS = [
   };
 
 
+  /* 結晶。連続で取るので短く、取るたび少し上がる */
+  Sound.prototype.coin = function (n) {
+    if (!this.ctx) return;
+    var t = this._now();
+    var k = Math.min(8, Math.max(1, n || 1));
+    var f = 880 * Math.pow(1.0595, (k - 1) * 2);
+    this._tone({ at: t, type: 'triangle', f0: f, dur: 0.07, vol: 0.11 });
+    this._tone({ at: t + 0.035, type: 'triangle', f0: f * 1.5, dur: 0.09, vol: 0.09 });
+  };
+
+  /* ご褒美の間に入った。ここだけは派手にする */
+  Sound.prototype.reward = function () {
+    if (!this.ctx) return;
+    var t = this._now();
+    [523, 659, 784, 1046, 1318].forEach(function (f, i) {
+      this._tone({ at: t + i * 0.07, type: 'triangle', f0: f, dur: 0.42, vol: 0.15 });
+      this._tone({ at: t + i * 0.07, type: 'square', f0: f * 2, dur: 0.16, vol: 0.05 });
+    }, this);
+    this._tone({ at: t + 0.35, type: 'sine', f0: 130, f1: 65, dur: 0.7, vol: 0.22, exp: true });
+    this._noiseBurst({ at: t, filter: 'highpass', fStart: 1200, fEnd: 6000, dur: 0.5, vol: 0.07 });
+  };
+
   Sound.prototype.pickup = function () {
     if (!this.ctx) return;
     var t = this._now();
@@ -802,6 +1122,8 @@ BM.DIRS = [
   /* ---------- 入力系 ---------- */
 
   FX.prototype.addShake = function (amount, dx, dy) {
+    // 演出を抑える設定では画面を揺らさない。ここで止めれば呼び出し側は触らずに済む
+    if (BM.a11y.reduced) { this.shake = 0; return; }
     this.shake = Math.min(26, this.shake + amount);
     if (dx || dy) {
       var l = Math.hypot(dx, dy) || 1;
@@ -812,11 +1134,16 @@ BM.DIRS = [
   };
 
   FX.prototype.addFlash = function (a, color) {
-    this.flash = Math.min(1, this.flash + a);
+    // 全画面フラッシュは光感受性で一番きついので、消すのではなく強さを落とす。
+    // 完全に消すと「何が起きたか」の手がかりも消えてしまう。
+    if (BM.a11y.reduced) a *= 0.22;
+    this.flash = Math.min(BM.a11y.reduced ? 0.22 : 1, this.flash + a);
     if (color) this.flashColor = color;
   };
 
   FX.prototype.addAberration = function (a) {
+    // RGB ずれは文字と岩の輪郭を二重に見せるので、抑える設定では出さない
+    if (BM.a11y.reduced) { this.aberration = 0; return; }
     // 強すぎると画面が読めなくなるので、上限は小さく・戻りは速く
     this.aberration = Math.min(5, this.aberration + a);
   };
@@ -837,6 +1164,8 @@ BM.DIRS = [
   };
 
   FX.prototype.spawn = function (n, opt) {
+    // 破片の量も落とす。画面全体でチラつく点が減ると、それだけで楽になる
+    if (BM.a11y.reduced) n = Math.max(1, Math.round(n * 0.35));
     for (var i = 0; i < n; i++) {
       var ang = opt.angle != null
         ? opt.angle + BM.rand(-opt.spread, opt.spread)
@@ -1298,6 +1627,123 @@ BM.DIRS = [
     this.lastType = '';
     this.t = 0;
     this.deepest = 0;
+    // ご褒美の間。mileDone は「何個目の節目まで置いたか」
+    this.mileDone = 0;
+    this.rewardLeft = 0;
+    this.rewardKind = null;
+    this.rewardHead = false;
+    this.rewardPlan = [];
+  };
+
+  /* 節目の中身。深さ（=節目の番号）だけで決まるようにしておく。
+     乱数で選ぶと、同じ深度を検査しても毎回違う結果になって確かめられない。 */
+  World.prototype.rewardAt = function (mile) {
+    if (mile % BM.EPIC_EVERY === 0) return BM.REWARD_EPIC;
+    if (mile % BM.BIG_EVERY === 0) return BM.REWARD_BIG;
+    // 大空洞が挟まると番号がずれて、特定の種類だけ出にくくなる。
+    // 大空洞のぶんを引いてから巡回させると4種が均等に回る。
+    // 別格は大空洞の位置（BIG_EVERY の倍数）に重なるので、追加の補正は要らない。
+    var i = mile - Math.floor(mile / BM.BIG_EVERY);
+    return BM.REWARDS[(i - 1) % BM.REWARDS.length];
+  };
+
+  /* その節目で開けたままにする層の数 */
+  World.prototype.rewardSpan = function (mile) {
+    if (mile % BM.EPIC_EVERY === 0) return BM.EPIC_SPAN;
+    if (mile % BM.BIG_EVERY === 0) return BM.BIG_SPAN;
+    return BM.REWARD_SPAN;
+  };
+
+  /* 到達ボーナス。普通の節目は早めに上限で止めて点が壊れるのを防ぐが、
+     別格だけは伸ばす。ここが深く潜り続けたことへの見返りになる。 */
+  World.prototype.rewardBonus = function (mile) {
+    var cap = (mile % BM.EPIC_EVERY === 0) ? BM.EPIC_BONUS_CAP : BM.MILESTONE_BONUS_CAP;
+    return BM.MILESTONE_BONUS * Math.min(mile, cap);
+  };
+
+  /* ご褒美の間に浮かべるものを、空間全体に配置してから配る。
+     結晶は落ちながら回収するものなので、蛇行する線に並べる。
+     取り逃しても損は無い（＝任意の寄り道）ようにしてある。 */
+  World.prototype.planReward = function (kind, row0, spanRows, cfg) {
+    var plan = [], mid = Math.round((L + R) / 2), i;
+    var list = kind.items || [];
+    for (i = 0; i < list.length; i++) {
+      // 入口の直後に置くと、そこへ横移動する時間が無くて取れない。
+      // 確定で渡すつもりの物なので、間を空けて中央寄りに置く。
+      plan.push({
+        type: list[i],
+        col: BM.clamp(mid + Math.round((i - (list.length - 1) / 2) * 2), L + 1, R - 1),
+        row: row0 + 6 + i * 4
+      });
+    }
+    var n = kind.coins || 0;
+    if (n > 0) {
+      var top = row0 + 8 + list.length * 4;
+      var step = Math.max(2, Math.floor((spanRows - (top - row0) - 2) / n));
+      // 蛇行の幅は「次の結晶までに横へ動ける距離」で決める。
+      // 固定値にすると、深いところでは結晶の列が自分より速く逃げて、
+      // 1個も取れない飾りになる。
+      // 角度から計算するだけでは列を整数に丸めた時にはみ出すので、
+      // 並べたあとに隣との差を実際に詰めて必ず追えるようにする。
+      var amp = 4;
+      var perStep = cfg.moveSpeed * (step * TILE / cfg.vTerm) / TILE;
+      var maxStep = Math.max(1, Math.floor(perStep * 0.75));
+      var dphase = Math.min(0.62, (perStep * 0.7) / amp);
+      var prev = null;
+      for (i = 0; i < n; i++) {
+        var col = mid + Math.round(Math.sin(i * dphase) * amp);
+        if (prev !== null) col = BM.clamp(col, prev - maxStep, prev + maxStep);
+        col = BM.clamp(col, L + 1, R - 1);
+        prev = col;
+        plan.push({ type: 'COIN', col: col, row: top + i * step });
+      }
+    }
+    return plan;
+  };
+
+  /* ご褒美の間の1枚。全マス空なので、ここでは絶対に死なない。 */
+  World.prototype.pushReward = function (rows, cfg) {
+    var spacing = cfg.spacing;
+    var layer = {
+      row: rows, type: 'reward', t: 0, phase: 0,
+      cells: newCells(BM.T_EMPTY),
+      gapX: Math.round((L + R) / 2),
+      button: null, dynamic: false, hint: '',
+      items: [], passed: false,
+      // 全マス空なので出口は縦坑の全幅。どこに居るかは決まらないので exitFree は立てない
+      exit: [L, R], exitFree: false,
+      kind: this.rewardKind, reward: null
+    };
+    if (this.rewardHead) {
+      this.rewardHead = false;
+      layer.reward = {
+        kind: this.rewardKind,
+        mile: this.mileDone,
+        depth: this.mileDone * BM.MILESTONE_ROWS,
+        bonus: this.rewardBonus(this.mileDone)
+      };
+    }
+    // 自分の担当区間にあるものだけ持つ。全部を先頭の層に持たせると、
+    // 画面外へ流れて層が捨てられた時に、まだ下にある結晶まで消える。
+    var keep = [], i;
+    for (i = 0; i < this.rewardPlan.length; i++) {
+      var e = this.rewardPlan[i];
+      if (e.row >= rows && (this.rewardLeft > 1 ? e.row < rows + spacing : true)) {
+        layer.items.push({ col: e.col, row: e.row, type: e.type, t: 0, alive: true });
+      } else keep.push(e);
+    }
+    this.rewardPlan = keep;
+    this.rewardLeft--;
+
+    this.layers.push(layer);
+    this.byRow[rows] = layer;
+    // どの列に居るかは決まらないので、次の穴は「両端から届く位置」に限る
+    this.exit = { lo: L, hi: R };
+    this.exitFree = false;
+    this.lastType = 'reward';
+    this.lastRow = rows;
+    this.nextRow = rows + spacing;
+    this.deepest = rows;
   };
 
   /* 横移動の速さも深度で上げる。落下だけ速くすると比率が壊れる。 */
@@ -1339,6 +1785,23 @@ BM.DIRS = [
       var cfg = this.difficulty(rows);
       cfg.vTerm = this.vTerm(rows);
       cfg.moveSpeed = this.moveSpeed(rows);
+      /* ---- 200m ごとのご褒美の間（底なし＝深さに終わりが無いので巡回する） ----
+         やっているのは「岩を置かないこと」だけ。層自体は普通に置くので、
+         到達可能性も可視性も自動的に満たされる。ここを特別扱いして
+         層を飛ばすと、その区間だけ不変条件の外に出てしまう。 */
+      var mile = Math.floor(rows / BM.MILESTONE_ROWS);
+      if (this.rewardLeft <= 0 && mile > this.mileDone && !this.debugType) {
+        this.mileDone = mile;
+        this.rewardKind = this.rewardAt(mile);
+        this.rewardLeft = this.rewardSpan(mile);
+        this.rewardHead = true;
+        this.rewardPlan = this.planReward(this.rewardKind, rows, this.rewardLeft * cfg.spacing, cfg);
+      }
+      if (this.rewardLeft > 0) {
+        this.pushReward(rows, cfg);
+        continue;
+      }
+
       // debugType はテスト専用。1種類の地層だけを並べて通れるか確かめるのに使う
       var type = this.debugType || pickType(rows, this.lastType);
 
@@ -1371,7 +1834,7 @@ BM.DIRS = [
         button: null,
         dynamic: false,
         hint: '',
-        item: null,
+        items: [],
         passed: false
       };
 
@@ -1414,16 +1877,28 @@ BM.DIRS = [
 
       BUILDERS[type](layer, cfg, { lo: this.exit.lo, hi: this.exit.hi });
 
+      // 動く層の作り直しの後で、開けた穴を必ず塗り直す
+      if (layer.dynamic && layer.refresh) {
+        layer.refresh = (function (fn) {
+          return function (t) {
+            fn.call(this, t);
+            if (this.punched) {
+              for (var k = 0; k < this.punched.length; k++) this.cells[this.punched[k]] = BM.T_EMPTY;
+            }
+          };
+        })(layer.refresh);
+      }
+
       // ときどきアイテムを浮かべる
       if (Math.random() < 0.3) {
         var pool = ['BOMB', 'BOMB', 'POWER', 'SHIELD', 'SLOW'];
-        layer.item = {
+        layer.items.push({
           col: BM.clamp(layer.gapX + BM.randInt(-1, 1), L, R),
           row: layer.row - BM.randInt(2, 4),
           type: BM.pick(pool),
           t: 0,
           alive: true
-        };
+        });
       }
 
       this.layers.push(layer);
@@ -1468,6 +1943,12 @@ BM.DIRS = [
     var l = this.byRow[row];
     if (!l || l.row !== row || !l.cells) return;
     l.cells[col] = v;
+    // 動く層は毎フレーム cells を作り直すので、そのままだと開けた穴が
+    // 次のフレームで塞がる。爆風で開けた穴は動いても残るのが正しい。
+    if (l.dynamic && v === BM.T_EMPTY) {
+      if (!l.punched) l.punched = [];
+      if (l.punched.indexOf(col) < 0) l.punched.push(col);
+    }
   };
 
   /* 画面より十分上に流れた地層を捨てる */
@@ -1514,6 +1995,7 @@ BM.DIRS = [
     this.iframe = 0;       // シールド発動直後の無敵
     this.shieldFlash = 0;  // 発動演出
     this.slow = 0;
+    this.slowMax = 0;   // 残り時間を割合で出すために、もらった長さを覚えておく
 
     this.alive = true;
     this.dir = 0;          // -1 / 0 / 1
@@ -1774,29 +2256,41 @@ BM.DIRS = [
 </script>
 <script>
 /* =========================================================
-   DEEP FALL — 広告枠（ゲームオーバー時のインタースティシャル）
+   DEEP FALL — ゲームオーバー時のインタースティシャル枠
 
-   ■ 実際の広告配信について
-   AdSense / AdMob などの実配信には、審査を通したアカウントと
-   配信元ドメインからの外部スクリプト読み込みが必要。
-   このゲームは外部通信をしない前提で作ってあり、Artifact として公開した
-   場合はセキュリティポリシーが外部スクリプトを全部ブロックする。
-   なので「配信そのもの」はここでは行えない。
+   ■ この枠は2通りに使える
 
-   代わりにこのモジュールは、広告の【枠と出し方】だけを実装している。
+   (1) 自分のサイトの他のゲームを宣伝する【推奨】
+       BM.ads.promos = [
+         { title: 'ゲーム名', body: '説明', cta: '遊ぶ',
+           url: '/games/xxx', accent: '#ffd23d', tag: 'おすすめ' }
+       ];
+       BM.ads.onClick = function (promo) { ... };   // 押された時。計測に使う
+
+       外部の広告ネットワークと比べて、審査も同意管理（CMP）も要らず、
+       広告ブロッカーにも消されず、外部通信も増えない。
+       そして販売サイトなら、広告表示1回より1本売れるほうが桁違いに大きい。
+
+   (2) 外部の広告配信に差し替える
+       BM.ads.provider = {
+         // container に配信タグを差し込み、表示が終わったら done() を呼ぶ
+         fill: function (container, done) { ... }
+       };
+
+       ただし外部配信には、審査を通したアカウントと【自分が所有するドメイン】、
+       EEA/UK 向けには同意管理（CMP）が要る。
+       また Artifact として公開した場合はセキュリティポリシーが
+       外部スクリプトを全部止めるので、そこでは動かない。
+
+   どちらの場合も、枠・ラベル・スキップ・頻度制御はそのまま使える。
+
+   ■ 守っていること
      ・標準的な 300×250（レクタングル大）の枠
-     ・「広告」ラベル（何が広告なのかを隠さない）
+     ・「広告」ラベルを必ず出す。自社の宣伝でも隠さない（隠せば騙しになる）
      ・カウントダウンと、一定秒後に押せるスキップ
      ・出しすぎない頻度制御（毎回は出さない）
-   中身の既定値は自社広告（このゲーム自身の告知）。
-
-   ■ 実際の配信に差し替える方法
-     BM.ads.provider = {
-       // container に配信タグを差し込み、表示が終わったら done() を呼ぶ
-       fill: function (container, done) { ... }
-     };
-   provider を入れれば自社広告の代わりにそれが使われる。
-   枠・ラベル・スキップ・頻度制御はそのまま流用できる。
+     ・【何があってもスキップだけは効く】。外部スクリプトは落ちるものなので、
+       出口を先に組んでから中身を入れる
    ========================================================= */
 (function (BM) {
   'use strict';
@@ -1841,13 +2335,35 @@ BM.DIRS = [
 
   var ads = {
     enabled: true,
-    provider: null,     // 実配信に差し替えるための口
+    provider: null,     // 外部の広告配信に差し替えるための口
     everyN: 2,          // 何回のゲームオーバーごとに出すか（毎回は出さない）
     minGapMs: 45000,    // 前回の表示から最低これだけ空ける
     skipAfter: 5,       // 何秒後にスキップを押せるようにするか
+    providerTimeoutMs: 8000,  // 外部配信が無反応な時に見切る時間
+
+    /* 自分のサイトに載せる時の差し替え口。
+       ここに他のゲームを入れると、ゲームオーバー画面がそのまま
+       「次にこれを遊びませんか」の場所になる。
+         BM.ads.promos = [
+           { title: 'ゲーム名', body: '説明', cta: '遊ぶ',
+             url: '/games/xxx', accent: '#ffd23d', tag: 'おすすめ' }
+         ];
+       外部の広告ネットワークと違って、審査も同意管理も要らず、
+       広告ブロッカーにも消されない。販売サイトなら収益もこちらのほうが大きい。 */
+    promos: null,
+
+    /* 押された時に呼ばれる。サイト側で計測に使う。
+       BM.ads.onClick = function (promo) { ... } */
+    onClick: null,
+
+    /* 何と表示するか。「これは宣伝である」ことは隠さない。
+       自社の宣伝でも同じ（隠すと、ただの騙しになる）。 */
+    label: '広告',
+
     _count: 0,
     _lastAt: 0,
     _timer: null,
+    _fallbackTimer: null,
     _pick: 0,
 
     /* 今回は出すか。出しすぎると、ただ邪魔なだけになる。 */
@@ -1871,16 +2387,24 @@ BM.DIRS = [
     /* 表示中に画面が切り替わった時の後始末 */
     cancel: function () {
       if (this._timer) { clearInterval(this._timer); this._timer = null; }
+      if (this._fallbackTimer) { clearTimeout(this._fallbackTimer); this._fallbackTimer = null; }
+    },
+
+    /* 今回出す中身。promos が入っていればそちらを優先する */
+    pick: function () {
+      var list = (this.promos && this.promos.length) ? this.promos : HOUSE;
+      var c = list[this._pick % list.length];
+      this._pick++;
+      return c;
     },
 
     show: function (panel, done) {
       var self = this;
-      var creative = HOUSE[this._pick % HOUSE.length];
-      this._pick++;
+      var creative = this.pick();
 
       panel.innerHTML =
         '<div class="ad-wrap">' +
-        '  <div class="ad-head"><span class="ad-label">広告</span>' +
+        '  <div class="ad-head"><span class="ad-label">' + this.label + '</span>' +
         '    <span class="ad-note" id="ad-note">' + this.skipAfter + ' 秒後にスキップできます</span></div>' +
         '  <div class="ad-slot" id="ad-slot"></div>' +
         '  <button class="ad-skip" id="ad-skip" disabled>スキップ <span id="ad-count">' +
@@ -1896,40 +2420,326 @@ BM.DIRS = [
       function finish() {
         if (finished) return;
         finished = true;
-        if (self._timer) { clearInterval(self._timer); self._timer = null; }
+        self.cancel();
         done();
       }
 
-      if (this.provider && typeof this.provider.fill === 'function') {
-        // 実配信。表示が終わったら provider 側から done を呼ばせる
-        this.provider.fill(slot, finish);
-      } else {
+      /* 出口を先に作る。
+         以前はここが provider の呼び出しより後にあり、外部スクリプトが
+         例外を投げるとスキップも カウントダウンも組まれないまま止まった。
+         広告ブロッカーや通信の失敗でごく普通に起きるので、
+         「何があってもスキップだけは効く」を先に保証する。 */
+      var left = this.skipAfter;
+      skip.addEventListener('click', function () { if (!skip.disabled) finish(); });
+      function openSkip(msg) {
+        if (self._timer) { clearInterval(self._timer); self._timer = null; }
+        skip.disabled = false;
+        count.textContent = '';
+        skip.textContent = 'スキップ ▶';
+        note.textContent = msg || 'スキップして結果を見る';
+      }
+      this._timer = setInterval(function () {
+        left--;
+        if (left > 0) { count.textContent = left; return; }
+        openSkip();
+      }, 1000);
+
+      /* 自前の中身（自社広告 / サイト内の他ゲーム）を描く */
+      function drawCreative() {
         slot.innerHTML =
-          '<div class="ad-creative" style="--ad:' + creative.accent + '">' +
-          '  <div class="ad-tag">' + creative.tag + '</div>' +
+          '<div class="ad-creative" style="--ad:' + (creative.accent || '#ffd23d') + '">' +
+          '  <div class="ad-tag">' + (creative.tag || '自社広告') + '</div>' +
           '  <div class="ad-title">' + creative.title + '</div>' +
           '  <div class="ad-body">' + creative.body + '</div>' +
           '  <div class="ad-cta">' + creative.cta + ' ▶</div>' +
           '</div>';
-        // 自社広告なので、クリックしたらそのまま結果画面へ進める
-        slot.addEventListener('click', finish);
+        slot.addEventListener('click', function () {
+          // 行き先があるなら開く。無ければ（このゲーム自身の告知なら）結果画面へ進む
+          if (typeof self.onClick === 'function') {
+            try { self.onClick(creative); } catch (e) { /* 計測の失敗で進行を止めない */ }
+          }
+          if (creative.url) {
+            try { window.open(creative.url, creative.target || '_blank', 'noopener'); }
+            catch (e) { /* 開けなくても結果画面へは進める */ }
+          }
+          finish();
+        });
       }
 
-      var left = this.skipAfter;
-      skip.addEventListener('click', function () { if (!skip.disabled) finish(); });
-      this._timer = setInterval(function () {
-        left--;
-        if (left > 0) { count.textContent = left; return; }
-        clearInterval(self._timer); self._timer = null;
-        skip.disabled = false;
-        count.textContent = '';
-        skip.textContent = 'スキップ ▶';
-        note.textContent = 'スキップして結果を見る';
-      }, 1000);
+      if (this.provider && typeof this.provider.fill === 'function') {
+        var filled = false;
+        try {
+          this.provider.fill(slot, function () { filled = true; finish(); });
+        } catch (e) {
+          // 外部配信が落ちた。枠を空のままにせず、自前の中身に差し替える
+          drawCreative();
+          openSkip('広告を読み込めませんでした');
+          return;
+        }
+        // 返事が来ない場合の見切り。無反応のまま待たせない
+        this._fallbackTimer = setTimeout(function () {
+          self._fallbackTimer = null;
+          if (filled || finished) return;
+          if (!slot.firstChild) drawCreative();
+          openSkip('広告を読み込めませんでした');
+        }, this.providerTimeoutMs);
+      } else {
+        drawCreative();
+      }
     }
   };
 
   BM.ads = ads;
+})(BM);
+</script>
+<script>
+/* =========================================================
+   DEEP FALL — 端末チェック（実機での確認用）
+
+   実機テストで一番困るのは「何が起きたかを持ち帰れないこと」。
+   スマホで触って「なんか変だった」とだけ分かっても直せない。
+   そこでこの画面が、
+
+     ・機械で分かることは自動で判定する（画面サイズ・押す的の寸法・
+       はみ出し・fps・音が鳴る状態か・保存が効くか）
+     ・実機でしか分からないことは、その場で ○ / × を付けられる
+     ・全部まとめてテキストにして、コピーできる
+
+   ようにしてある。コピーしたものをそのまま貼れば報告になる。
+
+   タイトルの「📱 端末チェック」か、URL に ?device=1 で開く。
+   ========================================================= */
+(function (BM) {
+  'use strict';
+
+  // 指で押す的の最小寸法。Apple HIG は 44pt、WCAG 2.5.5 も 44px を目安にしている
+  var MIN_TAP = 44;
+
+  /* 実機でしか分からないこと。ここは人が判定する。
+     「動くかどうか」ではなく「遊べるかどうか」を聞く。 */
+  var MANUAL = [
+    { id: 'thumb',  q: '左右のボタンに親指が自然に届く' },
+    { id: 'aim',    q: '落ちながら狙った隙間へ寄せられる' },
+    { id: 'coin',   q: '結晶（💠）を狙って拾える' },
+    { id: 'bomb',   q: '爆弾ボタンを押し間違えない' },
+    { id: 'read',   q: '岩と隙間が見分けられる（小さすぎない）' },
+    { id: 'hud',    q: '深度・爆弾の残数が読める' },
+    { id: 'sound',  q: '音が出る（マナーモードを解除して）' },
+    { id: 'smooth', q: '動きが引っかからない' },
+    { id: 'hot',    q: '数分遊んでも熱くならない・電池が急に減らない' }
+  ];
+
+  var state = {};   // id -> true / false / null
+  var fps = null;
+
+  function el(id) { return document.getElementById(id); }
+
+  /* 自動で判定できるもの。実機の値をそのまま読む */
+  function auto() {
+    var se = document.scrollingElement;
+    var touch = el('touch');
+    var btns = [].slice.call(document.querySelectorAll('#touch .tbtn')).map(function (b) {
+      var q = b.getBoundingClientRect();
+      return { key: b.getAttribute('data-key'), w: Math.round(q.width), h: Math.round(q.height) };
+    });
+    var minTap = btns.length ? Math.min.apply(null, btns.map(function (b) { return Math.min(b.w, b.h); })) : 0;
+    var labels = [].slice.call(document.querySelectorAll('.hud-label')).map(function (l) {
+      return l.getBoundingClientRect();
+    });
+    var cv = el('game').getBoundingClientRect();
+    var store = (function () {
+      try {
+        window.localStorage.setItem('deepfall.probe', '1');
+        var ok = window.localStorage.getItem('deepfall.probe') === '1';
+        window.localStorage.removeItem('deepfall.probe');
+        return ok;
+      } catch (e) { return false; }
+    })();
+    var ctx = BM.sound && BM.sound.ctx;
+
+    return {
+      view: innerWidth + '×' + innerHeight + ' / dpr ' + (devicePixelRatio || 1),
+      orient: innerWidth > innerHeight ? '横' : '縦',
+      touchPoints: navigator.maxTouchPoints || 0,
+      coarse: matchMedia('(hover:none) and (pointer:coarse)').matches,
+      touchShown: touch ? getComputedStyle(touch).display !== 'none' : false,
+      btns: btns, minTap: minTap,
+      hScroll: se.scrollWidth - se.clientWidth,
+      vScroll: se.scrollHeight - se.clientHeight,
+      labelsVisible: labels.length > 0 && labels.every(function (q) { return q.top >= 0 && q.left >= 0; }),
+      canvas: Math.round(cv.width) + '×' + Math.round(cv.height),
+      covered: typeof BM.isCovered === 'function' ? BM.isCovered() : false,
+      audio: ctx ? ctx.state : '未開始',
+      reduced: BM.a11y.reduced,
+      reducedFrom: BM.a11y.pref() === null ? 'OS の設定' : '手動',
+      store: store,
+      ua: navigator.userAgent
+    };
+  }
+
+  /* 自動判定の合否。実機で壊れていたら困るものだけを ○×する */
+  function verdicts(a) {
+    var v = [];
+    v.push({ ok: a.coarse === a.touchShown, q: '指で触る端末なら操作ボタンが出る',
+             got: a.touchShown ? '出ている' : '出ていない' });
+    if (a.touchShown) {
+      v.push({ ok: a.minTap >= MIN_TAP, q: '押す的が ' + MIN_TAP + 'px 以上',
+               got: '最小 ' + a.minTap + 'px' });
+    }
+    v.push({ ok: a.hScroll <= 0, q: '横スクロールが出ない', got: a.hScroll + 'px' });
+    v.push({ ok: a.covered || a.vScroll <= 0, q: 'スクロールなしで全部入る',
+             got: a.covered ? '横持ち（案内中）' : 'はみ出し ' + a.vScroll + 'px' });
+    v.push({ ok: a.labelsVisible, q: 'HUD のラベルが全部見える', got: a.labelsVisible ? '見える' : '切れている' });
+    v.push({ ok: a.store, q: '記録が保存できる', got: a.store ? '使える' : '使えない' });
+    if (fps != null) {
+      v.push({ ok: fps >= 45, q: '45fps 以上出る', got: fps.toFixed(0) + 'fps' });
+    }
+    return v;
+  }
+
+  function mark(x) { return x === true ? '○' : (x === false ? '×' : '－'); }
+
+  function render() {
+    var a = auto();
+    var v = verdicts(a);
+    var h = '';
+
+    h += '<h2 style="font-size:20px;margin-bottom:2px">📱 端末チェック</h2>';
+    h += '<div class="sub" style="margin-bottom:10px">この結果をコピーして送れば、そのまま報告になります</div>';
+
+    h += '<div class="dev-sec">自動判定</div>';
+    h += '<div class="dev-list">';
+    v.forEach(function (r) {
+      h += '<div class="dev-row"><span class="dev-mark ' + (r.ok ? 'ok' : 'ng') + '">' +
+           (r.ok ? '○' : '×') + '</span><span class="dev-q">' + r.q +
+           '</span><span class="dev-got">' + r.got + '</span></div>';
+    });
+    if (fps == null) {
+      h += '<div class="dev-row"><span class="dev-mark">…</span><span class="dev-q">fps を測る</span>' +
+           '<span class="dev-got"><button class="dev-btn" data-dev="fps">測る</button></span></div>';
+    }
+    h += '</div>';
+
+    h += '<div class="dev-sec">実機で確かめること<small>（触ってから ○ か × を押す）</small></div>';
+    h += '<div class="dev-list">';
+    MANUAL.forEach(function (m) {
+      var s = state[m.id];
+      h += '<div class="dev-row"><span class="dev-mark ' +
+           (s === true ? 'ok' : s === false ? 'ng' : '') + '">' + mark(s) + '</span>' +
+           '<span class="dev-q">' + m.q + '</span>' +
+           '<span class="dev-got">' +
+           '<button class="dev-btn' + (s === true ? ' on' : '') + '" data-dev="y:' + m.id + '">○</button>' +
+           '<button class="dev-btn' + (s === false ? ' on ng' : '') + '" data-dev="n:' + m.id + '">×</button>' +
+           '</span></div>';
+    });
+    h += '</div>';
+
+    h += '<div class="dev-sec">端末</div>';
+    h += '<div class="dev-info">' +
+         '画面 ' + a.view + '（' + a.orient + '）／ゲーム画面 ' + a.canvas + '<br>' +
+         'タッチ点 ' + a.touchPoints + '／音 ' + a.audio +
+         '／演出の抑制 ' + (a.reduced ? 'ON' : 'OFF') + '（' + a.reducedFrom + '）<br>' +
+         '<span class="dev-ua">' + a.ua + '</span></div>';
+
+    h += '<div class="menu" style="margin-top:12px">' +
+         '<button data-dev="copy">📋 結果をコピー</button>' +
+         '<button data-act="title">◀ タイトルへ</button>' +
+         '</div>';
+    h += '<div class="dev-note" id="dev-note"></div>';
+
+    BM.ui.show('<div class="dev-wrap">' + h + '</div>');
+    var panel = el('panel');
+    panel.classList.add('dev');
+    // ボタンは1か所でまとめて受ける（作り直しのたびに付け直さなくて済む）
+    panel.onclick = function (ev) {
+      var b = ev.target.closest ? ev.target.closest('[data-dev]') : null;
+      if (!b) return;
+      var cmd = b.getAttribute('data-dev');
+      b.blur();
+      if (cmd === 'fps') { measureFps(); return; }
+      if (cmd === 'copy') { copyReport(); return; }
+      var m = /^([yn]):(.+)$/.exec(cmd);
+      if (m) {
+        var id = m[2], want = m[1] === 'y';
+        state[id] = (state[id] === want) ? null : want;   // 同じものを押したら取り消し
+        render();
+      }
+    };
+  }
+
+  /* fps はその端末の実測でないと意味がないので、この場で測る */
+  function measureFps() {
+    var note = el('dev-note');
+    if (note) note.textContent = '2秒間 測っています…';
+    var n = 0, t0 = performance.now();
+    (function tick() {
+      n++;
+      var dt = performance.now() - t0;
+      if (dt >= 2000) { fps = n / (dt / 1000); render(); return; }
+      requestAnimationFrame(tick);
+    })();
+  }
+
+  function report() {
+    var a = auto();
+    var v = verdicts(a);
+    var L = [];
+    L.push('DEEP FALL 端末チェック');
+    L.push('画面 ' + a.view + '（' + a.orient + '）/ ゲーム画面 ' + a.canvas);
+    L.push('タッチ点 ' + a.touchPoints + ' / 操作ボタン ' + (a.touchShown ? '出ている' : '出ていない') +
+           ' / 押す的 最小 ' + a.minTap + 'px');
+    L.push('音 ' + a.audio + ' / 演出の抑制 ' + (a.reduced ? 'ON' : 'OFF') + '（' + a.reducedFrom + '）' +
+           ' / 保存 ' + (a.store ? '使える' : '使えない'));
+    L.push('fps ' + (fps == null ? '未計測' : fps.toFixed(0)));
+    L.push('');
+    L.push('[自動判定]');
+    v.forEach(function (r) { L.push((r.ok ? '○ ' : '× ') + r.q + ' … ' + r.got); });
+    L.push('');
+    L.push('[実機で確かめること]');
+    MANUAL.forEach(function (m) { L.push(mark(state[m.id]) + ' ' + m.q); });
+    var ng = MANUAL.filter(function (m) { return state[m.id] === false; });
+    var un = MANUAL.filter(function (m) { return state[m.id] == null; });
+    L.push('');
+    L.push('× が付いたもの: ' + (ng.length ? ng.map(function (m) { return m.q; }).join(' / ') : 'なし'));
+    if (un.length) L.push('未判定: ' + un.length + ' 件');
+    L.push('');
+    L.push(a.ua);
+    return L.join('\n');
+  }
+
+  function copyReport() {
+    var txt = report();
+    var note = el('dev-note');
+    var done = function (ok) {
+      if (!note) return;
+      note.textContent = ok ? 'コピーしました。そのまま貼って送ってください。'
+                            : 'コピーできませんでした。下の文字を長押しで選んでください。';
+      if (!ok) {
+        var ta = document.createElement('textarea');
+        ta.className = 'dev-out';
+        ta.readOnly = true;
+        ta.value = txt;
+        note.appendChild(ta);
+        ta.focus(); ta.select();
+      }
+    };
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(txt).then(function () { done(true); }, function () { done(false); });
+        return;
+      }
+    } catch (e) { /* 下の手動コピーへ */ }
+    done(false);
+  }
+
+  BM.devicecheck = {
+    open: function () { fps = null; render(); },
+    report: report,
+    auto: auto,
+    verdicts: function () { return verdicts(auto()); },
+    MANUAL: MANUAL,
+    MIN_TAP: MIN_TAP
+  };
 })(BM);
 </script>
 <script>
@@ -1976,6 +2786,8 @@ BM.DIRS = [
     this.deathLog = [];
     this.passedCount = 0;
     this.speedMul = 1;
+    this.coinRun = 0; this.coinRunT = 0;
+    this.reward = null;
     this.bgDust = [];
     for (var i = 0; i < 46; i++) {
       this.bgDust.push({ x: Math.random() * W, y: Math.random() * H, r: BM.rand(0.6, 2.2), s: BM.rand(0.15, 0.7) });
@@ -2000,6 +2812,8 @@ BM.DIRS = [
     this.zoneIndex = 0;
     this.deathLog = [];
     this.passedCount = 0;
+    this.coinRun = 0; this.coinRunT = 0;
+    this.reward = null;
     this.camY = this.player.y - H * 0.34;
     this.world.ensure(BM.rowOf(this.camY) + BM.VIEW_ROWS + 24);
     this.state = BM.S_PLAY;
@@ -2015,6 +2829,9 @@ BM.DIRS = [
     if (this.hitStop > 0) { this.hitStop -= dt; dt *= 0.2; }
     this.stateT += dt;
     if (this.chainT > 0) { this.chainT -= dt; if (this.chainT <= 0) this.chain = 0; }
+    // 結晶を続けて取ると倍率が上がる。少し離れると切れる
+    if (this.coinRunT > 0) { this.coinRunT -= dt; if (this.coinRunT <= 0) this.coinRun = 0; }
+    if (this.reward) { this.reward.t += dt; if (this.reward.t > 2.6) this.reward = null; }
 
     if (BM.autopilot.enabled) BM.autopilot.step(this);
 
@@ -2284,24 +3101,73 @@ BM.DIRS = [
   Game.prototype.checkItems = function () {
     var p = this.player;
     for (var i = 0; i < this.world.layers.length; i++) {
-      var it = this.world.layers[i].item;
-      if (!it || !it.alive) continue;
-      var ix = BM.centerX(it.col), iy = BM.centerY(it.row);
-      if (Math.abs(p.x - ix) < p.r + 14 && Math.abs(p.y - iy) < p.r + 14) {
+      var list = this.world.layers[i].items;
+      if (!list) continue;
+      for (var k = 0; k < list.length; k++) {
+        var it = list[k];
+        if (!it.alive) continue;
+        var ix = BM.centerX(it.col), iy = BM.centerY(it.row);
+        if (Math.abs(p.x - ix) >= p.r + 14 || Math.abs(p.y - iy) >= p.r + 14) continue;
         it.alive = false;
         var def = BM.ITEMS[it.type];
         switch (it.type) {
           case 'BOMB':   p.bombs = Math.min(BM.MAX_BOMBS, p.bombs + 1); break;
           case 'POWER':  p.power = Math.min(BM.MAX_POWER, p.power + 1); break;
-          case 'SHIELD': p.shield = Math.min(3, p.shield + 1); break;
-          case 'SLOW':   p.slow = 3.5; break;
+          // 上限突破ぶんを持っている時に min() で丸めると、拾ったのに減る。
+          // 拾いで増えるのは通常の上限までだが、それを下回らせてはいけない。
+          case 'SHIELD': if (p.shield < BM.SHIELD_MAX) p.shield += 1; break;
+          case 'SLOW':   p.slow = p.slowMax = 3.5; break;
+          // 結晶は取るほど連なって点が伸びる。落ちながらの寄り道の見返り
+          case 'COIN':
+            this.coinRun = (this.coinRun || 0) + 1;
+            this.coinRunT = 1.2;
+            break;
         }
-        this.score += 100;
-        this.fx.text(ix, iy - 14, def.label, def.color, 15);
+        if (it.type === 'COIN') {
+          var v = BM.COIN_SCORE * Math.min(5, this.coinRun);
+          this.score += v;
+          this.fx.text(ix, iy - 14, '+' + v + (this.coinRun > 1 ? ' ×' + Math.min(5, this.coinRun) : ''),
+                       def.color, 15);
+          BM.sound.coin(this.coinRun);
+        } else {
+          this.score += 100;
+          var msg = def.label;
+          if (it.type === 'POWER') msg = '爆風 ' + p.power + '/' + BM.MAX_POWER;
+          else if (it.type === 'SHIELD') msg = 'シールド ' + p.shield + '枚';
+          else if (it.type === 'BOMB') msg = '爆弾 ' + p.bombs + '/' + BM.MAX_BOMBS;
+          this.fx.text(ix, iy - 14, msg, def.color, 15);
+          BM.sound.pickup();
+        }
         this.fx.sparkle(ix, iy, def.color);
-        BM.sound.pickup();
       }
     }
+  };
+
+  /* ご褒美の間に入った時。ここで確実に何かが増える。
+     深く潜っても景色しか変わらないと、深度そのものが目的にならない。 */
+  Game.prototype.grantReward = function (r) {
+    var p = this.player, k = r.kind, got = [];
+    if (k.bombsFull && p.bombs < BM.MAX_BOMBS) { p.bombs = BM.MAX_BOMBS; got.push('爆弾 満タン'); }
+    if (k.bombs) { p.bombs = Math.min(BM.MAX_BOMBS, p.bombs + k.bombs); got.push('爆弾 +' + k.bombs); }
+    if (k.shield && p.shield < BM.SHIELD_MAX) {
+      p.shield = Math.min(BM.SHIELD_MAX, p.shield + k.shield);
+      got.push('シールド +' + k.shield);
+    }
+    // 別格だけは通常の上限を超えて持てる。アイテム拾いでは絶対に到達できない枚数
+    if (k.shieldFull && p.shield < BM.SHIELD_CAP) {
+      p.shield = BM.SHIELD_CAP;
+      got.push('シールド ' + BM.SHIELD_CAP + '枚（上限突破）');
+    }
+    if (k.powerFull && p.power < BM.MAX_POWER) { p.power = BM.MAX_POWER; got.push('爆風 最大'); }
+    if (k.slow) { p.slow = p.slowMax = k.slow; got.push('スロー ' + k.slow + '秒'); }
+    this.score += r.bonus;
+    this.reward = { kind: k, t: 0, depth: r.depth, bonus: r.bonus };
+    this.fx.addFlash(0.3, '255,224,120');
+    this.fx.addShake(4);
+    // バナーは出さない。ご褒美の内容はトーストが全部書くので、
+    // 同じ文字が2枚重なって両方読めなくなる（100m ごとの地層バナーとも被る）
+    BM.ui.reward(r.depth, k, r.bonus, got);
+    BM.sound.reward();
   };
 
   Game.prototype.checkPassed = function () {
@@ -2312,6 +3178,7 @@ BM.DIRS = [
       if (p.y > (l.row + 1) * TILE) {
         l.passed = true;
         this.passedCount++;
+        if (l.reward) { this.grantReward(l.reward); continue; }
         this.score += 50;
         // ぎりぎりを抜けたら褒める
         var col = BM.colOf(p.x);
@@ -2348,6 +3215,7 @@ BM.DIRS = [
     this.fx.drawBelow(g);
     this.drawWalls(g, z);
     this.drawLayers(g, z);
+    this.drawRewardBands(g);
     this.drawItems(g);
     this.drawButtons(g);
     this.drawBombs(g);
@@ -2357,6 +3225,7 @@ BM.DIRS = [
     g.restore();
     this.drawDepthRail(g, z);
     this.drawVignette(g);
+    this.drawStatus(g);
     if (this.noDeath) this.drawInspectBadge(g);
 
     var ctx = this.ctx;
@@ -2577,24 +3446,79 @@ BM.DIRS = [
 
   Game.prototype.drawItems = function (g) {
     for (var i = 0; i < this.world.layers.length; i++) {
-      var it = this.world.layers[i].item;
-      if (!it || !it.alive) continue;
-      var def = BM.ITEMS[it.type];
-      var x = BM.centerX(it.col), y = BM.centerY(it.row) + Math.sin(this.world.t * 3 + it.col) * 4;
+      var list = this.world.layers[i].items;
+      if (!list) continue;
+      for (var k = 0; k < list.length; k++) {
+        var it = list[k];
+        if (!it.alive) continue;
+        var def = BM.ITEMS[it.type];
+        var x = BM.centerX(it.col), y = BM.centerY(it.row) + Math.sin(this.world.t * 3 + it.col) * 4;
+        g.save();
+        g.translate(x, y);
+        if (it.type === 'COIN') {
+          // 結晶は小さく軽く。数が多いので四角い枠は付けない
+          g.rotate(this.world.t * 2.2 + it.col);
+          g.globalCompositeOperation = 'lighter';
+          var cg = g.createRadialGradient(0, 0, 1, 0, 0, 16);
+          cg.addColorStop(0, hexA(def.color, 0.55));
+          cg.addColorStop(1, hexA(def.color, 0));
+          g.fillStyle = cg;
+          g.beginPath(); g.arc(0, 0, 16, 0, 6.3); g.fill();
+          g.globalCompositeOperation = 'source-over';
+          g.fillStyle = def.color;
+          g.beginPath();
+          g.moveTo(0, -8); g.lineTo(6, 0); g.lineTo(0, 8); g.lineTo(-6, 0);
+          g.closePath(); g.fill();
+          g.fillStyle = 'rgba(255,255,255,.75)';
+          g.beginPath(); g.moveTo(0, -8); g.lineTo(3, -2); g.lineTo(0, 1); g.lineTo(-3, -2);
+          g.closePath(); g.fill();
+          g.restore();
+          continue;
+        }
+        g.globalCompositeOperation = 'lighter';
+        var gr = g.createRadialGradient(0, 0, 2, 0, 0, 24);
+        gr.addColorStop(0, hexA(def.color, 0.5));
+        gr.addColorStop(1, hexA(def.color, 0));
+        g.fillStyle = gr;
+        g.beginPath(); g.arc(0, 0, 24, 0, 6.3); g.fill();
+        g.globalCompositeOperation = 'source-over';
+        g.beginPath(); BM.roundRect(g, -13, -13, 26, 26, 8); g.fillStyle = 'rgba(16,10,28,.92)'; g.fill();
+        g.strokeStyle = def.color; g.lineWidth = 2; g.stroke();
+        g.font = '15px system-ui, sans-serif';
+        g.textAlign = 'center'; g.textBaseline = 'middle';
+        g.fillText(def.glyph, 0, 1);
+        g.restore();
+      }
+    }
+  };
+
+  /* ご褒美の間の見た目。岩が無いだけだと「生成が抜けた」ようにも見えるので、
+     入口に光る帯と名前を出して、意図してある空間だと分かるようにする。 */
+  Game.prototype.drawRewardBands = function (g) {
+    for (var i = 0; i < this.world.layers.length; i++) {
+      var l = this.world.layers[i];
+      if (l.type !== 'reward' || !l.reward) continue;
+      var y = l.row * TILE, c = l.kind.color;
       g.save();
-      g.translate(x, y);
-      g.globalCompositeOperation = 'lighter';
-      var gr = g.createRadialGradient(0, 0, 2, 0, 0, 24);
-      gr.addColorStop(0, hexA(def.color, 0.5));
-      gr.addColorStop(1, hexA(def.color, 0));
+      var gr = g.createLinearGradient(0, y - 26, 0, y + 26);
+      gr.addColorStop(0, hexA(c, 0));
+      gr.addColorStop(0.5, hexA(c, 0.5));
+      gr.addColorStop(1, hexA(c, 0));
       g.fillStyle = gr;
-      g.beginPath(); g.arc(0, 0, 24, 0, 6.3); g.fill();
-      g.globalCompositeOperation = 'source-over';
-      g.beginPath(); BM.roundRect(g, -13, -13, 26, 26, 8); g.fillStyle = 'rgba(16,10,28,.92)'; g.fill();
-      g.strokeStyle = def.color; g.lineWidth = 2; g.stroke();
-      g.font = '15px system-ui, sans-serif';
-      g.textAlign = 'center'; g.textBaseline = 'middle';
-      g.fillText(def.glyph, 0, 1);
+      g.fillRect(L * TILE, y - 26, (R - L + 1) * TILE, 52);
+      g.strokeStyle = hexA(c, 0.9); g.lineWidth = 2;
+      g.beginPath(); g.moveTo(L * TILE, y); g.lineTo((R + 1) * TILE, y); g.stroke();
+      // 文字は左寄せ。中央に置くと、入った直後に出る中央のトーストと
+      // 帯が上へ流れる途中で必ず重なって、両方読めなくなる。
+      var tx = L * TILE + 10;
+      g.fillStyle = hexA(c, 0.95);
+      g.font = '900 15px system-ui, sans-serif';
+      g.textAlign = 'left'; g.textBaseline = 'bottom';
+      g.fillText(l.reward.depth + 'm  ' + l.kind.name, tx, y - 7);
+      g.font = '600 10px system-ui, sans-serif';
+      g.textBaseline = 'top';
+      g.fillStyle = hexA(c, 0.7);
+      g.fillText(l.kind.desc + '   +' + l.reward.bonus, tx, y + 7);
       g.restore();
     }
   };
@@ -2701,14 +3625,26 @@ BM.DIRS = [
       sg.addColorStop(1, 'rgba(140,232,255,' + (0.14 + boost * 0.5).toFixed(2) + ')');
       g.fillStyle = sg;
       g.beginPath(); g.arc(0, 0, rad, 0, 6.3); g.fill();
-      // 枚数ぶんの回るリング
-      var n = Math.max(1, p.shield);
+      // 枚数ぶんの回るリング。ただし通常の上限まで。
+      // 枚数ぶん増やし続けると、内側のリングが主人公に重なって本体が見えなくなる。
+      var n = Math.max(1, Math.min(BM.SHIELD_MAX, p.shield));
       for (var si = 0; si < n; si++) {
         g.strokeStyle = 'rgba(140,232,255,' + (0.45 + boost * 0.5).toFixed(2) + ')';
         g.lineWidth = 2.2;
         g.beginPath();
         g.arc(0, 0, rad - si * 3.5, p.spin * (si % 2 ? -1.6 : 1.6) + si, p.spin * (si % 2 ? -1.6 : 1.6) + si + 4.4);
         g.stroke();
+      }
+      // 上限を超えて持っているぶんは、内側に足すのではなく外側の桃色の環で示す
+      if (p.shield > BM.SHIELD_MAX) {
+        var ex = p.shield - BM.SHIELD_MAX;
+        for (var xi = 0; xi < ex; xi++) {
+          g.strokeStyle = 'rgba(255,122,200,' + (0.6 + boost * 0.4).toFixed(2) + ')';
+          g.lineWidth = 2.4;
+          g.beginPath();
+          g.arc(0, 0, rad + 4 + xi * 4, -p.spin * 2.1 + xi * 2.2, -p.spin * 2.1 + xi * 2.2 + 3.6);
+          g.stroke();
+        }
       }
       g.restore();
     }
@@ -2924,8 +3860,36 @@ BM.DIRS = [
         g.fillText(m + 'm', W - 15, y + 3);
       }
     }
+    this.drawNextReward(g);
     g.restore();
     void x;
+  };
+
+  /* 次のご褒美までの残り。次に何が待っているかが見えていないと、
+     ただ落ちているだけになる。深さに終わりが無いので、
+     目標は常に「次の節目」になる。 */
+  Game.prototype.drawNextReward = function (g) {
+    var d = this.player.deepest;
+    var mile = Math.floor(d / BM.MILESTONE_ROWS) + 1;
+    var next = mile * BM.MILESTONE_ROWS;
+    var kind = this.world.rewardAt(mile);
+    var left = next - d;
+    var near = left <= 40;
+    g.save();
+    g.textAlign = 'right';
+    g.font = '800 11px system-ui, sans-serif';
+    g.fillStyle = hexA(kind.color, near ? 0.95 : 0.6);
+    g.fillText('次 ' + next + 'm  ' + kind.name, W - 16, 16);
+    g.font = '700 10px system-ui, sans-serif';
+    g.fillStyle = 'rgba(255,255,255,' + (near ? 0.8 : 0.42) + ')';
+    g.fillText('あと ' + left + 'm', W - 16, 30);
+    // 残りをそのまま帯にする
+    var frac = 1 - left / BM.MILESTONE_ROWS;
+    g.fillStyle = 'rgba(255,255,255,.12)';
+    g.fillRect(W - 96, 36, 80, 3);
+    g.fillStyle = hexA(kind.color, near ? 0.95 : 0.55);
+    g.fillRect(W - 96, 36, 80 * BM.clamp(frac, 0, 1), 3);
+    g.restore();
   };
 
   /* 構造確認モードの状態表示。
@@ -2957,11 +3921,112 @@ BM.DIRS = [
     g.restore();
   };
 
+  /* 画面左上に出す常設の状態表示。
+     HUD は幅が一杯で、爆風もスローも結晶の倍率も出す場所が無かった。
+     「持っているのに画面のどこにも無い」＝プレイヤーには存在しないのと同じなので、
+     縦坑の中の空いている左上に置く。
+
+     描く内容はここで組み立てて返し、描画はそれを読むだけにしてある。
+     canvas の中身はテストから読めないので、こうしておかないと
+     「本当に出ているか」を機械で確かめられない。 */
+  Game.prototype.statusRows = function () {
+    var p = this.player, rows = [];
+    // 爆風は常に出す。最大が何なのか分からないと「最大にした」も伝わらない
+    rows.push({
+      key: 'power', label: '爆風', color: '#ff8a4c',
+      value: p.power, of: BM.MAX_POWER,
+      frac: p.power / BM.MAX_POWER,
+      text: p.power + '/' + BM.MAX_POWER,
+      full: p.power >= BM.MAX_POWER,
+      warn: false
+    });
+    if (p.slow > 0) {
+      var sm = p.slowMax || 3.5;
+      rows.push({
+        key: 'slow', label: 'スロー', color: '#c9a6ff',
+        value: p.slow, of: sm,
+        frac: BM.clamp(p.slow / sm, 0, 1),
+        text: p.slow.toFixed(1) + '秒',
+        full: false,
+        warn: p.slow <= 1        // 切れる直前は点滅させる
+      });
+    }
+    if (this.coinRun > 0) {
+      rows.push({
+        key: 'coin', label: '結晶', color: '#ffe066',
+        value: this.coinRun, of: 5,
+        frac: BM.clamp(this.coinRunT / 1.2, 0, 1),
+        text: '×' + Math.min(5, this.coinRun),
+        full: this.coinRun >= 5,
+        warn: this.coinRunT <= 0.4
+      });
+    }
+    return rows;
+  };
+
+  Game.prototype.drawStatus = function (g) {
+    var rows = this.statusRows();
+    if (!rows.length) return;
+    var LABEL_F = '700 10px system-ui, sans-serif';
+    var VAL_F = '800 10px system-ui, sans-serif';
+    var i, r;
+
+    // 幅は実測から組む。固定値で置くと、桁が伸びた時に数字がバーに重なる
+    g.save();
+    var labelW = 0, valW = 0;
+    g.font = LABEL_F;
+    for (i = 0; i < rows.length; i++) labelW = Math.max(labelW, g.measureText(rows[i].label).width);
+    g.font = VAL_F;
+    for (i = 0; i < rows.length; i++) valW = Math.max(valW, g.measureText(rows[i].text).width);
+    var PAD = 8, GAP = 7, BAR = 44, rh = 15;
+    var w = Math.ceil(PAD + labelW + GAP + BAR + GAP + valW + PAD);
+    var h = PAD * 2 - 4 + rows.length * rh;
+    // 構造確認モードのバッジと同じ場所なので、その下へずらす
+    var x0 = 8, y0 = this.noDeath ? 70 : 8;
+
+    g.fillStyle = 'rgba(10,6,18,.72)';
+    g.beginPath(); roundRect(g, x0, y0, w, h, 7); g.fill();
+    g.strokeStyle = 'rgba(255,255,255,.1)'; g.lineWidth = 1; g.stroke();
+
+    for (i = 0; i < rows.length; i++) {
+      r = rows[i];
+      var y = y0 + PAD + 2 + i * rh;
+      // 点滅は「切れる直前」だけ。常時光らせると意味が薄れる。
+      // 抑える設定では点滅させず、色を落として「もう少しで切れる」を示す
+      var a = 1;
+      if (r.warn) a = BM.a11y.reduced ? 0.6 : (0.45 + 0.55 * Math.abs(Math.sin(this.stateT * 9)));
+      g.globalAlpha = a;
+      g.font = LABEL_F;
+      g.textAlign = 'left'; g.textBaseline = 'middle';
+      g.fillStyle = 'rgba(230,220,250,.75)';
+      g.fillText(r.label, x0 + PAD, y);
+      // 残量のバー
+      var bx = x0 + PAD + labelW + GAP;
+      g.fillStyle = 'rgba(255,255,255,.12)';
+      g.fillRect(bx, y - 3, BAR, 5);
+      g.fillStyle = r.color;
+      g.fillRect(bx, y - 3, Math.max(1, BAR * r.frac), 5);
+      if (r.full) {
+        g.strokeStyle = r.color; g.lineWidth = 1;
+        g.strokeRect(bx - 1.5, y - 4.5, BAR + 3, 8);
+      }
+      g.font = VAL_F;
+      g.textAlign = 'right';
+      g.fillStyle = r.color;
+      g.fillText(r.text, x0 + w - PAD, y);
+      g.globalAlpha = 1;
+    }
+    g.restore();
+  };
+
   Game.prototype.drawVignette = function (g) {
     var v = 0.4 + this.fx.vignette * 0.45;
+    // スロー中は周辺を紫に振る。数字だけだと、効いている実感が無い
+    var slow = this.player.slow > 0;
+    var col = this.fx.vignette > 0.05 ? '60,0,0' : (slow ? '58,30,96' : '0,0,0');
     var gr = g.createRadialGradient(W / 2, H / 2, H * 0.32, W / 2, H / 2, H * 0.8);
     gr.addColorStop(0, 'rgba(0,0,0,0)');
-    gr.addColorStop(1, 'rgba(' + (this.fx.vignette > 0.05 ? '60,0,0' : '0,0,0') + ',' + v.toFixed(2) + ')');
+    gr.addColorStop(1, 'rgba(' + col + ',' + (slow ? Math.min(0.92, v + 0.16) : v).toFixed(2) + ')');
     g.fillStyle = gr;
     g.fillRect(0, 0, W, H);
   };
@@ -3057,15 +4122,24 @@ BM.DIRS = [
       }
       el.shield = document.getElementById('hud-shield');
       el.shieldPips = document.getElementById('shield-pips');
-      for (var s = 0; s < BM.SHIELD_MAX; s++) {
+      // 上限突破ぶんまで枠を作っておく。持った時に作ると HUD の幅が動いて
+      // 他の数値がずれるので、場所は最初から確保しておく（初期は非表示）。
+      for (var s = 0; s < BM.SHIELD_CAP; s++) {
         var sp = document.createElement('span');
-        sp.className = 'pip sh';
+        sp.className = 'pip sh' + (s >= BM.SHIELD_MAX ? ' extra' : '');
         el.shieldPips.appendChild(sp);
       }
       el.banner = document.getElementById('combo-banner');
+      el.rewardToast = document.getElementById('reward-toast');
     },
     hide: function () { BM.ads.cancel(); el.overlay.classList.add('hidden'); },
-    show: function (html) { el.panel.innerHTML = html; el.overlay.classList.remove('hidden'); },
+    show: function (html) {
+      // 端末チェックが張った専用の見た目と click を必ず落としてから描き替える
+      el.panel.classList.remove('dev');
+      el.panel.onclick = null;
+      el.panel.innerHTML = html;
+      el.overlay.classList.remove('hidden');
+    },
 
     banner: function (text) {
       el.banner.textContent = text;
@@ -3073,6 +4147,24 @@ BM.DIRS = [
       void el.banner.offsetWidth;
       el.banner.classList.add('show');
     },
+    /* ご褒美の間。何をもらったのかを文字で出す。
+       演出だけだと「光ったけど何が起きた?」で終わる。 */
+    reward: function (depth, kind, bonus, got) {
+      var n = el.rewardToast;
+      if (!n) return;
+      n.style.setProperty('--rw', kind.color);
+      n.innerHTML =
+        '<div class="rw-depth">' + depth + 'm 到達</div>' +
+        '<div class="rw-name">' + kind.name + '</div>' +
+        (got && got.length
+          ? '<div class="rw-got">' + got.map(function (t) { return '<span>' + t + '</span>'; }).join('') + '</div>'
+          : '<div class="rw-got"><span>' + kind.desc + '</span></div>') +
+        '<div class="rw-bonus">+' + bonus.toLocaleString('en-US') + '</div>';
+      n.classList.remove('show');
+      void n.offsetWidth;
+      n.classList.add('show');
+    },
+
     bump: function (node) { node.classList.remove('bump'); void node.offsetWidth; node.classList.add('bump'); },
 
     _d: -1, _s: -1, _b: -1, _sh: -1,
@@ -3085,7 +4177,12 @@ BM.DIRS = [
         this._d = p.deepest;
       }
       if (g.score !== this._s) {
-        el.score.textContent = g.score.toLocaleString('en-US');
+        var txt = g.score.toLocaleString('en-US');
+        el.score.textContent = txt;
+        // 桁が増えたら字を小さくする。枠を広げると HUD が1行に収まらなくなり、
+        // 隣の BEST に食い込む。深部のご褒美で8桁まで伸びるので、ここは必要。
+        el.score.classList.toggle('long', txt.length > 9);
+        el.score.classList.toggle('longer', txt.length > 11);
         if (g.score > this._s && this._s >= 0) this.bump(el.score);
         this._s = g.score;
       }
@@ -3102,6 +4199,8 @@ BM.DIRS = [
         var sps = el.shieldPips.children;
         for (var j = 0; j < sps.length; j++) sps[j].classList.toggle('on', j < p.shield);
         el.shield.classList.toggle('none', p.shield === 0);
+        // 上限を超えて持っている時だけ、はみ出したぶんを見せる
+        el.shield.classList.toggle('over', p.shield > BM.SHIELD_MAX);
         if (p.shield < this._sh) {
           el.shield.classList.remove('fire'); void el.shield.offsetWidth; el.shield.classList.add('fire');
         }
@@ -3117,6 +4216,7 @@ BM.DIRS = [
         '<div class="menu">' +
         '<button data-act="play">▶ 落ちる</button>' +
         '<button data-act="how">📖 あそびかた</button>' +
+        '<button data-act="device">📱 端末チェック</button>' +
         '</div>' +
         '<div class="tips">最高到達 <b>' + g.bestDepth + 'm</b> ／ ハイスコア <b>' +
         g.bestScore.toLocaleString('en-US') + '</b></div>'
@@ -3142,7 +4242,19 @@ BM.DIRS = [
         '<p><b>爆弾は腰のポーチから取り出す。</b>初期3個・最大9個で、拾わない限り増えない。<br>' +
         '画面右上の丸が残数。<b style="color:#ff8a6a">0になると赤く点滅し、押しても空振りする</b>ので、<br>' +
         'どの層で使うかを決めてから落とすこと。💣 のアイテムで1個補充できる。</p>' +
+        '<p><b>画面左上に、今の状態が常に出ている。</b>' +
+        '<b style="color:#ff8a4c">爆風</b>（2〜6。大きいほど広く掘れる）／' +
+        '<b style="color:#c9a6ff">スロー</b>の残り時間（切れる直前に点滅する。スロー中は画面の縁が紫）／' +
+        '<b style="color:#ffe066">結晶</b>の連続倍率（続けて拾うと最大5倍）。</p>' +
         '<p>100m ごとに地層が変わり、落下速度も層の間隔も上がっていく。</p>' +
+        '<p><code>R</code> で<b>演出を抑える</b>（画面揺れ・全画面フラッシュ・色ずれを止める）。' +
+        'OS の「視差を減らす」設定が入っていれば最初から抑えた状態で始まる。</p>' +
+        '<p><b style="color:#ffe066">200m ごとに「ご褒美の間」がある。</b>' +
+        'その区間だけ岩が無く、爆弾の補給・シールド・爆風アップ・結晶（💠 点数）が' +
+        '待っている。中身は4種を巡回し、<b>1000m ごとは全部盛りの大空洞</b>、' +
+        '<b style="color:#ff7ac8">10000m ごとは「地核の間」でシールドの上限を超える</b>。<br>' +
+        '画面右上に次の節目と残り距離が出ている。<b>深さに終わりは無い</b>ので、' +
+        '目標は常に次の節目。</p>' +
         '</div>' +
         '<div class="menu"><button data-act="back">◀ もどる</button></div>'
       );
@@ -3156,6 +4268,8 @@ BM.DIRS = [
         '<button data-act="title">◀ タイトルへ</button>' +
         '</div>' +
         '<div class="tips">音楽 <code>M</code> ／ 効果音 <code>N</code><br>' +
+        '演出を抑える <code>R</code>（画面揺れ・フラッシュ・色ずれ）… <b>' +
+        (BM.a11y.reduced ? 'ON' : 'OFF') + '</b><br>' +
         '構造確認モード（無敵） <code>I</code> ／ 早送り <code>T</code></div>'
       );
     },
@@ -3211,6 +4325,7 @@ BM.DIRS = [
         ui.showTitle(game);
         break;
       case 'how': ui.showHow(); break;
+      case 'device': BM.devicecheck.open(); break;
       case 'back': ui.showTitle(game); break;
     }
   }
@@ -3231,6 +4346,12 @@ BM.DIRS = [
       return;
     }
     if (k === 'n') { BM.sound.sfxOn = !BM.sound.sfxOn; return; }
+    if (k === 'r') {   // 演出（画面揺れ・フラッシュ・RGBずれ）を抑える
+      var red = BM.a11y.toggle();
+      ui.banner(red ? '演出を抑える ON' : '演出を抑える OFF');
+      if (game.state === BM.S_PAUSE) ui.showPause();
+      return;
+    }
     if (k === 'i') {   // 構造確認モード（無敵。操作は自分でする）
       game.noDeath = !game.noDeath;
       if (!game.noDeath) BM.autopilot.enabled = false;
@@ -3281,7 +4402,29 @@ BM.DIRS = [
     requestAnimationFrame(frame);
   }
 
+  /* 横持ちで画面が覆われている間は止める。
+     案内を出しているのに裏で落ち続けていると、見えないまま墜落する。
+     縦に戻した時は自動で再開しない（ポーズ画面から自分で戻す）。
+     持ち替えている最中に勝手に動き出すと、その一瞬で死ぬ。 */
+  function watchOrientation() {
+    var mq;
+    try {
+      mq = window.matchMedia('(hover:none) and (pointer:coarse) and (orientation:landscape) and (max-height:480px)');
+    } catch (e) { return; }
+    var onChange = function () {
+      if (!mq.matches || !game) return;
+      if (game.state === BM.S_PLAY) { game.state = BM.S_PAUSE; ui.showPause(); }
+    };
+    if (mq.addEventListener) mq.addEventListener('change', onChange);
+    else if (mq.addListener) mq.addListener(onChange);
+    BM.isCovered = function () { return !!mq.matches; };
+    onChange();
+  }
+
   window.addEventListener('load', function () {
+    // 演出を抑えるかどうかは、何かを描く前に決めておく
+    BM.a11y.apply();
+    BM.a11y.watch();
     ui.cache();
     bindTouch();
     game = new BM.Game(document.getElementById('game'));
@@ -3290,6 +4433,12 @@ BM.DIRS = [
     if (/[?&]inspect=1/.test(location.search)) game.noDeath = true;
     // ?noads=1 で広告を止める（テストや動作確認用）
     if (/[?&]noads=1/.test(location.search)) BM.ads.enabled = false;
+    // ?device=1 … 端末チェックを直接開く（実機に URL を渡す時に使う）
+    if (/[?&]device=1/.test(location.search)) setTimeout(function () { BM.devicecheck.open(); }, 0);
+    // ?reduce=1 / ?reduce=0 … 演出の抑制を明示する（検査用。保存もされる）
+    var rm = /[?&]reduce=([01])/.exec(location.search);
+    if (rm) BM.a11y.set(rm[1] === '1');
+    watchOrientation();
     ui.showTitle(game);
     requestAnimationFrame(frame);
   });

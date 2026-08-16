@@ -67,15 +67,24 @@
       }
       el.shield = document.getElementById('hud-shield');
       el.shieldPips = document.getElementById('shield-pips');
-      for (var s = 0; s < BM.SHIELD_MAX; s++) {
+      // 上限突破ぶんまで枠を作っておく。持った時に作ると HUD の幅が動いて
+      // 他の数値がずれるので、場所は最初から確保しておく（初期は非表示）。
+      for (var s = 0; s < BM.SHIELD_CAP; s++) {
         var sp = document.createElement('span');
-        sp.className = 'pip sh';
+        sp.className = 'pip sh' + (s >= BM.SHIELD_MAX ? ' extra' : '');
         el.shieldPips.appendChild(sp);
       }
       el.banner = document.getElementById('combo-banner');
+      el.rewardToast = document.getElementById('reward-toast');
     },
     hide: function () { BM.ads.cancel(); el.overlay.classList.add('hidden'); },
-    show: function (html) { el.panel.innerHTML = html; el.overlay.classList.remove('hidden'); },
+    show: function (html) {
+      // 端末チェックが張った専用の見た目と click を必ず落としてから描き替える
+      el.panel.classList.remove('dev');
+      el.panel.onclick = null;
+      el.panel.innerHTML = html;
+      el.overlay.classList.remove('hidden');
+    },
 
     banner: function (text) {
       el.banner.textContent = text;
@@ -83,6 +92,24 @@
       void el.banner.offsetWidth;
       el.banner.classList.add('show');
     },
+    /* ご褒美の間。何をもらったのかを文字で出す。
+       演出だけだと「光ったけど何が起きた?」で終わる。 */
+    reward: function (depth, kind, bonus, got) {
+      var n = el.rewardToast;
+      if (!n) return;
+      n.style.setProperty('--rw', kind.color);
+      n.innerHTML =
+        '<div class="rw-depth">' + depth + 'm 到達</div>' +
+        '<div class="rw-name">' + kind.name + '</div>' +
+        (got && got.length
+          ? '<div class="rw-got">' + got.map(function (t) { return '<span>' + t + '</span>'; }).join('') + '</div>'
+          : '<div class="rw-got"><span>' + kind.desc + '</span></div>') +
+        '<div class="rw-bonus">+' + bonus.toLocaleString('en-US') + '</div>';
+      n.classList.remove('show');
+      void n.offsetWidth;
+      n.classList.add('show');
+    },
+
     bump: function (node) { node.classList.remove('bump'); void node.offsetWidth; node.classList.add('bump'); },
 
     _d: -1, _s: -1, _b: -1, _sh: -1,
@@ -95,7 +122,12 @@
         this._d = p.deepest;
       }
       if (g.score !== this._s) {
-        el.score.textContent = g.score.toLocaleString('en-US');
+        var txt = g.score.toLocaleString('en-US');
+        el.score.textContent = txt;
+        // 桁が増えたら字を小さくする。枠を広げると HUD が1行に収まらなくなり、
+        // 隣の BEST に食い込む。深部のご褒美で8桁まで伸びるので、ここは必要。
+        el.score.classList.toggle('long', txt.length > 9);
+        el.score.classList.toggle('longer', txt.length > 11);
         if (g.score > this._s && this._s >= 0) this.bump(el.score);
         this._s = g.score;
       }
@@ -112,6 +144,8 @@
         var sps = el.shieldPips.children;
         for (var j = 0; j < sps.length; j++) sps[j].classList.toggle('on', j < p.shield);
         el.shield.classList.toggle('none', p.shield === 0);
+        // 上限を超えて持っている時だけ、はみ出したぶんを見せる
+        el.shield.classList.toggle('over', p.shield > BM.SHIELD_MAX);
         if (p.shield < this._sh) {
           el.shield.classList.remove('fire'); void el.shield.offsetWidth; el.shield.classList.add('fire');
         }
@@ -127,6 +161,7 @@
         '<div class="menu">' +
         '<button data-act="play">▶ 落ちる</button>' +
         '<button data-act="how">📖 あそびかた</button>' +
+        '<button data-act="device">📱 端末チェック</button>' +
         '</div>' +
         '<div class="tips">最高到達 <b>' + g.bestDepth + 'm</b> ／ ハイスコア <b>' +
         g.bestScore.toLocaleString('en-US') + '</b></div>'
@@ -152,7 +187,19 @@
         '<p><b>爆弾は腰のポーチから取り出す。</b>初期3個・最大9個で、拾わない限り増えない。<br>' +
         '画面右上の丸が残数。<b style="color:#ff8a6a">0になると赤く点滅し、押しても空振りする</b>ので、<br>' +
         'どの層で使うかを決めてから落とすこと。💣 のアイテムで1個補充できる。</p>' +
+        '<p><b>画面左上に、今の状態が常に出ている。</b>' +
+        '<b style="color:#ff8a4c">爆風</b>（2〜6。大きいほど広く掘れる）／' +
+        '<b style="color:#c9a6ff">スロー</b>の残り時間（切れる直前に点滅する。スロー中は画面の縁が紫）／' +
+        '<b style="color:#ffe066">結晶</b>の連続倍率（続けて拾うと最大5倍）。</p>' +
         '<p>100m ごとに地層が変わり、落下速度も層の間隔も上がっていく。</p>' +
+        '<p><code>R</code> で<b>演出を抑える</b>（画面揺れ・全画面フラッシュ・色ずれを止める）。' +
+        'OS の「視差を減らす」設定が入っていれば最初から抑えた状態で始まる。</p>' +
+        '<p><b style="color:#ffe066">200m ごとに「ご褒美の間」がある。</b>' +
+        'その区間だけ岩が無く、爆弾の補給・シールド・爆風アップ・結晶（💠 点数）が' +
+        '待っている。中身は4種を巡回し、<b>1000m ごとは全部盛りの大空洞</b>、' +
+        '<b style="color:#ff7ac8">10000m ごとは「地核の間」でシールドの上限を超える</b>。<br>' +
+        '画面右上に次の節目と残り距離が出ている。<b>深さに終わりは無い</b>ので、' +
+        '目標は常に次の節目。</p>' +
         '</div>' +
         '<div class="menu"><button data-act="back">◀ もどる</button></div>'
       );
@@ -166,6 +213,8 @@
         '<button data-act="title">◀ タイトルへ</button>' +
         '</div>' +
         '<div class="tips">音楽 <code>M</code> ／ 効果音 <code>N</code><br>' +
+        '演出を抑える <code>R</code>（画面揺れ・フラッシュ・色ずれ）… <b>' +
+        (BM.a11y.reduced ? 'ON' : 'OFF') + '</b><br>' +
         '構造確認モード（無敵） <code>I</code> ／ 早送り <code>T</code></div>'
       );
     },
@@ -221,6 +270,7 @@
         ui.showTitle(game);
         break;
       case 'how': ui.showHow(); break;
+      case 'device': BM.devicecheck.open(); break;
       case 'back': ui.showTitle(game); break;
     }
   }
@@ -241,6 +291,12 @@
       return;
     }
     if (k === 'n') { BM.sound.sfxOn = !BM.sound.sfxOn; return; }
+    if (k === 'r') {   // 演出（画面揺れ・フラッシュ・RGBずれ）を抑える
+      var red = BM.a11y.toggle();
+      ui.banner(red ? '演出を抑える ON' : '演出を抑える OFF');
+      if (game.state === BM.S_PAUSE) ui.showPause();
+      return;
+    }
     if (k === 'i') {   // 構造確認モード（無敵。操作は自分でする）
       game.noDeath = !game.noDeath;
       if (!game.noDeath) BM.autopilot.enabled = false;
@@ -291,7 +347,29 @@
     requestAnimationFrame(frame);
   }
 
+  /* 横持ちで画面が覆われている間は止める。
+     案内を出しているのに裏で落ち続けていると、見えないまま墜落する。
+     縦に戻した時は自動で再開しない（ポーズ画面から自分で戻す）。
+     持ち替えている最中に勝手に動き出すと、その一瞬で死ぬ。 */
+  function watchOrientation() {
+    var mq;
+    try {
+      mq = window.matchMedia('(hover:none) and (pointer:coarse) and (orientation:landscape) and (max-height:480px)');
+    } catch (e) { return; }
+    var onChange = function () {
+      if (!mq.matches || !game) return;
+      if (game.state === BM.S_PLAY) { game.state = BM.S_PAUSE; ui.showPause(); }
+    };
+    if (mq.addEventListener) mq.addEventListener('change', onChange);
+    else if (mq.addListener) mq.addListener(onChange);
+    BM.isCovered = function () { return !!mq.matches; };
+    onChange();
+  }
+
   window.addEventListener('load', function () {
+    // 演出を抑えるかどうかは、何かを描く前に決めておく
+    BM.a11y.apply();
+    BM.a11y.watch();
     ui.cache();
     bindTouch();
     game = new BM.Game(document.getElementById('game'));
@@ -300,6 +378,12 @@
     if (/[?&]inspect=1/.test(location.search)) game.noDeath = true;
     // ?noads=1 で広告を止める（テストや動作確認用）
     if (/[?&]noads=1/.test(location.search)) BM.ads.enabled = false;
+    // ?device=1 … 端末チェックを直接開く（実機に URL を渡す時に使う）
+    if (/[?&]device=1/.test(location.search)) setTimeout(function () { BM.devicecheck.open(); }, 0);
+    // ?reduce=1 / ?reduce=0 … 演出の抑制を明示する（検査用。保存もされる）
+    var rm = /[?&]reduce=([01])/.exec(location.search);
+    if (rm) BM.a11y.set(rm[1] === '1');
+    watchOrientation();
     ui.showTitle(game);
     requestAnimationFrame(frame);
   });

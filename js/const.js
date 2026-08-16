@@ -55,6 +55,8 @@ BM.CHAIN_DELAY   = 0.055;
 
 /* ---------- シールド ---------- */
 BM.SHIELD_MAX    = 3;
+// 通常はここまで。10000m ごとの「地核の間」だけがこの上限を超えさせる
+BM.SHIELD_CAP    = 5;
 BM.SHIELD_POWER  = 3;    // 発動時に開ける穴（通常の爆弾より大きい）
 BM.SHIELD_IFRAME = 0.7;  // 発動直後の無敵。厚い層で複数枚消費するのを防ぐ
 
@@ -82,8 +84,47 @@ BM.ITEMS = {
   BOMB:   { key: 'BOMB',   label: '爆弾 +1',   glyph: '💣', color: '#ffd9a8' },
   POWER:  { key: 'POWER',  label: '爆風アップ', glyph: '🔥', color: '#ff8a4c' },
   SHIELD: { key: 'SHIELD', label: 'シールド',   glyph: '🛡', color: '#8ce8ff' },
-  SLOW:   { key: 'SLOW',   label: 'スロー',     glyph: '🌀', color: '#c9a6ff' }
+  SLOW:   { key: 'SLOW',   label: 'スロー',     glyph: '🌀', color: '#c9a6ff' },
+  COIN:   { key: 'COIN',   label: '結晶',       glyph: '💠', color: '#ffe066' }
 };
+
+/* ---------- ご褒美の間（200m ごと・底なしで無限に続く） ----------
+   400m から先は難易度カーブが飽和して、構造としては同じものの繰り返しになる。
+   それだけだと深く潜る理由が無くなるので、200m ごとに必ず開けた空間を置いて
+   息をつかせ、確実な見返りを渡す。深さに終わりは無いので、
+   中身は4種を巡回させ、1000m ごとに全部盛りの大空洞にする。 */
+BM.MILESTONE_ROWS = 200;   // 何m ごとにご褒美を置くか
+BM.REWARD_SPAN    = 3;     // 開けたままにする層の数（この間は岩が無い）
+BM.BIG_EVERY      = 5;     // 何回ごとに大空洞にするか（5 → 1000m ごと）
+BM.BIG_SPAN       = 5;
+BM.EPIC_EVERY     = 50;    // 何回ごとに別格にするか（50 → 10000m ごと）
+BM.EPIC_SPAN      = 10;
+BM.MILESTONE_BONUS = 500;  // 到達ボーナス。節目ごとに増える
+BM.MILESTONE_BONUS_CAP = 20;  // 増え続けると点が壊れるので、この節目で止める
+// 別格だけは上限を高く取る。ここが「深く潜り続けた見返り」になる
+BM.EPIC_BONUS_CAP = 200;
+BM.COIN_SCORE     = 120;   // 結晶1個の点
+
+/* 中身のレパートリー。巡回するので、どこまで潜っても次のご褒美が来る */
+BM.REWARDS = [
+  { key: 'supply', name: '補給の間',  color: '#ffd9a8',
+    desc: '爆弾を満タンに', bombsFull: true, items: ['BOMB', 'BOMB'], coins: 3 },
+  { key: 'trove',  name: '宝物庫',    color: '#ffe066',
+    desc: '結晶をかき集めろ', coins: 12 },
+  { key: 'relic',  name: '遺物の間',  color: '#8ce8ff',
+    desc: 'シールドと爆風', items: ['SHIELD', 'POWER'], coins: 3 },
+  { key: 'tail',   name: '追い風の間', color: '#c9a6ff',
+    desc: '落下がゆるむ', slow: 6, bombs: 2, items: ['SLOW'], coins: 5 }
+];
+BM.REWARD_BIG = { key: 'cavern', name: '大空洞', color: '#8affd0',
+  desc: '全部持っていけ', bombsFull: true, shield: 1,
+  items: ['SHIELD', 'POWER', 'BOMB'], coins: 18 };
+
+/* 10000m ごとの別格。ここだけは通常の上限を超える。
+   4種＋大空洞の巡回だけだと、2000m と 20000m で質的な違いが無くなる。 */
+BM.REWARD_EPIC = { key: 'core', name: '地核の間', color: '#ff7ac8',
+  desc: '限界を一枚超える', bombsFull: true, shieldFull: true, powerFull: true,
+  items: ['SHIELD', 'POWER', 'BOMB', 'BOMB'], coins: 40 };
 
 /* ---------- 保存 ---------- */
 BM.store = {
@@ -95,6 +136,57 @@ BM.store = {
   },
   set: function (k, v) {
     try { window.localStorage.setItem(k, v); } catch (e) { /* 保存できなくても遊べる */ }
+  }
+};
+
+/* ---------- 演出を抑える設定 ----------
+   このゲームは画面揺れ・全画面フラッシュ・RGBずれを使っている。
+   これは人によっては本当に遊べなくなる（前庭系の症状・光感受性）。
+   OS の「視差を減らす」設定を既定として尊重し、そのうえで
+   OS の設定を変えられない人のために手動でも切り替えられるようにする。
+
+   保存は3状態：未保存＝OSまかせ / '1'＝常に抑える / '0'＝常に出す。 */
+BM.a11y = {
+  reduced: false,
+  KEY: 'deepfall.reduce',
+
+  osReduced: function () {
+    try {
+      return !!(window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches);
+    } catch (e) { return false; }
+  },
+
+  pref: function () {
+    var v = BM.store.get(this.KEY, null);
+    return v === '1' ? true : (v === '0' ? false : null);
+  },
+
+  /* 抑えるかどうかを決めて反映する。CSS 側はこのクラスだけを見る */
+  apply: function () {
+    var p = this.pref();
+    this.reduced = (p === null) ? this.osReduced() : p;
+    try {
+      document.documentElement.classList.toggle('reduce-motion', this.reduced);
+    } catch (e) { /* DOM 前でも落ちないように */ }
+    return this.reduced;
+  },
+
+  set: function (v) {
+    BM.store.set(this.KEY, v ? '1' : '0');
+    return this.apply();
+  },
+
+  toggle: function () { return this.set(!this.reduced); },
+
+  /* OS 側の設定変更に追従する（手動で決めている時は触らない） */
+  watch: function () {
+    var self = this;
+    try {
+      var mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+      var on = function () { if (self.pref() === null) self.apply(); };
+      if (mq.addEventListener) mq.addEventListener('change', on);
+      else if (mq.addListener) mq.addListener(on);
+    } catch (e) { /* 対応していない環境ではOSの初期値だけ見る */ }
   }
 };
 

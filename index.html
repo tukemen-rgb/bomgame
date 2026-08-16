@@ -44,6 +44,7 @@
     </div>
 
     <div id="combo-banner"></div>
+    <div id="reward-toast"></div>
   </div>
 
   <div id="touch" aria-hidden="true">
@@ -57,9 +58,19 @@
     <span><b>← →</b> 横移動</span>
     <span><b>↓</b> 急降下</span>
     <span><b>Space</b> 爆弾を落とす</span>
-    <span><b>P</b> ポーズ / <b>M</b> 音楽 / <b>N</b> 効果音</span>
+    <span><b>P</b> ポーズ / <b>M</b> 音楽 / <b>N</b> 効果音 / <b>R</b> 演出を抑える</span>
   </footer>
 
+</div>
+
+<!-- 横持ちの端末向け。低い画面には縦坑が入らないので、素直に縦にしてもらう。
+     覆っている間はゲームを止める（見えないまま落ちて死ぬのが一番まずい）。 -->
+<div id="rotate" role="alertdialog" aria-live="polite">
+  <div class="rot-box">
+    <div class="rot-icon">📱</div>
+    <div class="rot-title">画面を縦にしてください</div>
+    <div class="rot-sub">横持ちだと縦坑が画面に入りません。<br>縦に戻すと続きから再開できます。</div>
+  </div>
 </div>
 
 <script src="js/const.js"></script>
@@ -69,6 +80,7 @@
 <script src="js/entities.js"></script>
 <script src="js/autopilot.js"></script>
 <script src="js/ads.js"></script>
+<script src="js/devicecheck.js"></script>
 <script src="js/game.js"></script>
 <script src="js/main.js"></script>
 </body>

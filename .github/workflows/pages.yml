@@ -1,0 +1,62 @@
+name: pages (手動)
+
+# スマホ実機で試すための公開 URL を作るためのもの。
+#
+# ■ 手動実行だけにしてある
+#   push では絶対に動かない。Actions の画面から Run workflow を押した時だけ。
+#
+# ■ 実行すると公開される
+#   これを動かすと、ゲームが公開 URL でだれでも見られる状態になる。
+#   リポジトリが private でも Pages は公開されるので、それでよいか
+#   確認してから実行すること。
+#
+# ■ 事前に必要な設定
+#   GitHub の Settings → Pages → Source を「GitHub Actions」にしておく。
+#   していない場合は deploy が失敗する（それ以外の副作用は無い）。
+#
+# 置くのは同梱済みの 1 ファイルだけ。依存も外部通信も無いので、
+# これだけでゲームが完全に動く。
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      # dist/ は commit してあるが、念のためソースから作り直したものを出す。
+      # 古い dist を公開して「直したはずのものが直っていない」となるのが一番困る。
+      - name: 同梱版をソースから作り直す
+        run: node tools/bundle.js
+
+      - name: 公開するものを並べる
+        run: |
+          mkdir -p _site
+          cp dist/deep-fall.html _site/index.html
+          # スマホから直接開けるように、端末チェック付きの入口も置く
+          printf '<meta http-equiv="refresh" content="0;url=./index.html?device=1">' > _site/device.html
+
+      - uses: actions/configure-pages@v5
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+      - id: deploy
+        uses: actions/deploy-pages@v4
