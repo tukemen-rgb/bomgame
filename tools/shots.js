@@ -175,14 +175,106 @@ function chromiumPath() {
   });
   await shot('04-blast.png', { banner: true });   // 連鎖のバナーは実際に出る演出なので残す
 
+  /* --- カバー画像 ---
+     一覧に最初に出る1枚。遊んでいる場面と違い、横長で
+     「何のゲームか」が一目で分かる必要がある。
+     縦長の画面写真をカバーに使うと、一覧の枠で上下が切れる。 */
+  await page.setViewportSize({ width: 960, height: 504 });   // dpr2 → 1920x1008
+  await page.evaluate(() => {
+    const g = BM.game;
+    g.state = BM.S_PLAY;
+    BM.autopilot.enabled = true; BM.ads.enabled = false;
+    g.newRun(); BM.ui.hide();
+  });
+  await page.waitForTimeout(5000);
+  await page.evaluate(() => {
+    const g = BM.game;
+    // 岩が画面に入っている瞬間で止める（空だけの絵にしない）
+    for (let i = 0; i < 900; i++) {
+      const next = g.world.layers
+        .filter(l => l.row * BM.TILE > g.player.y + 40)
+        .sort((a, b) => a.row - b.row)[0];
+      if (next) {
+        const d = next.row * BM.TILE - g.player.y;
+        if (d < 260 && d > 170) break;
+      }
+      g.update(1 / 120);
+    }
+    g.render();
+    g.state = BM.S_PAUSE;
+
+    const app = document.getElementById('app');
+    const cover = document.createElement('div');
+    cover.id = 'cover';
+    cover.innerHTML =
+      '<div class="cv-text">' +
+      '  <div class="cv-title">DEEP FALL</div>' +
+      '  <div class="cv-sub">落ち続けろ。<b>止まった時が終わり。</b></div>' +
+      '  <div class="cv-body">爆弾で足元を掘りながら、どこまでも下へ。<br>' +
+      '  地面に触れた瞬間に終わり。止まることは許されていない。</div>' +
+      '  <div class="cv-tags"><span>9種の突破口</span><span>200mごとのご褒美</span>' +
+      '<span>深さに終わりなし</span></div>' +
+      '</div>';
+    document.body.appendChild(cover);
+    cover.appendChild(app);
+
+    const css = document.createElement('style');
+    css.textContent = `
+      body{overflow:hidden}
+      #cover{
+        position:fixed;inset:0;display:flex;align-items:center;justify-content:center;
+        gap:44px;padding:0 56px;
+        background:
+          radial-gradient(900px 600px at 18% 40%, #2a1a45 0%, transparent 62%),
+          radial-gradient(700px 500px at 92% 105%, #3a1030 0%, transparent 60%),
+          #0a0710;
+      }
+      #cover #app{width:342px;flex:0 0 auto;margin:0}
+      #cover #legend{display:none}
+      .cv-text{max-width:520px}
+      .cv-title{
+        font-size:76px;font-weight:900;letter-spacing:.05em;line-height:1;
+        background:linear-gradient(180deg,#fff3c4,#ffd23d 45%,#ff6a3d);
+        -webkit-background-clip:text;background-clip:text;color:transparent;
+        filter:drop-shadow(0 6px 26px rgba(255,106,61,.55));
+      }
+      .cv-sub{font-size:22px;font-weight:700;color:#f4ecff;margin-top:14px;line-height:1.5}
+      .cv-sub b{color:#ff8a6a}
+      .cv-body{font-size:14.5px;line-height:1.9;color:#9a86c4;margin-top:14px}
+      .cv-tags{display:flex;gap:8px;margin-top:20px;flex-wrap:wrap}
+      .cv-tags span{
+        font-size:12px;font-weight:800;color:#ffe9a8;
+        border:1px solid rgba(255,210,61,.45);border-radius:999px;padding:5px 13px;
+      }`;
+    document.head.appendChild(css);
+  });
+  await page.waitForTimeout(200);
+  await page.screenshot({ path: path.join(OUT, '00-cover.png') });
+  console.log('  00-cover.png');
+
   await browser.close();
   srv.close();
 
+  /* 投稿先の画像要件（GAMEYARD の手引きに書かれているもの）を、
+     出した直後にここで確かめる。上げてから弾かれると往復が増える。
+       ・PNG / JPG / WebP
+       ・1枚 3MB まで
+       ・最小 600×315、最大 4096×4096 */
+  const MIN_W = 600, MIN_H = 315, MAX_WH = 4096, MAX_MB = 3;
   const files = fs.readdirSync(OUT).sort();
   console.log(`\ndist/press/ に ${files.length} 枚`);
+  let bad = 0;
   files.forEach(f => {
-    const kb = (fs.statSync(path.join(OUT, f)).size / 1024).toFixed(0);
-    console.log(`  ${f}  ${kb} KB`);
+    const buf = fs.readFileSync(path.join(OUT, f));
+    const w = buf.readUInt32BE(16), h = buf.readUInt32BE(20);   // PNG のヘッダ
+    const mb = buf.length / 1024 / 1024;
+    const ng = [];
+    if (w < MIN_W || h < MIN_H) ng.push(`小さすぎる(最小 ${MIN_W}x${MIN_H})`);
+    if (w > MAX_WH || h > MAX_WH) ng.push(`大きすぎる(最大 ${MAX_WH})`);
+    if (mb > MAX_MB) ng.push(`重すぎる(最大 ${MAX_MB}MB)`);
+    if (ng.length) bad++;
+    console.log(`  ${f}  ${w}x${h}  ${mb.toFixed(2)}MB  ${ng.length ? '★' + ng.join(' ') : 'OK'}`);
   });
+  if (bad) { console.log(`\n★ ${bad} 枚が投稿先の画像要件を満たしていません`); process.exit(1); }
   if (errors.length) { console.log('ERRORS:', errors.slice(0, 3)); process.exit(1); }
 })();
