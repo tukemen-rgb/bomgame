@@ -74,6 +74,18 @@ function chromiumPath() {
   check('中身が index.html と README.txt だけ',
     listed.length === 2 && listed.indexOf('README.txt') >= 0);
 
+  /* 投稿先の制限。GAMEYARD（play-game-yard.com/upload/）が公開している要件：
+       ・1作品 200MB までの zip
+       ・zip 内 5,000 ファイル以内
+       ・HTML5 は zip の直下に index.html
+     どれも今は桁違いに余裕があるが、うっかりアセットを抱え込んだ時に
+     気付けるよう、条件として書いておく。 */
+  const MAX_MB = 200, MAX_FILES = 5000;
+  const mb = first.length / 1024 / 1024;
+  check(`投稿サイトの上限 ${MAX_MB}MB 以内（${mb.toFixed(2)}MB）`, mb <= MAX_MB);
+  check(`投稿サイトの上限 ${MAX_FILES.toLocaleString('en-US')} ファイル以内（${listed.length}）`,
+    listed.length <= MAX_FILES);
+
   /* ---- 3. 展開したものが本当に遊べるか ---- */
   console.log('\n=== 3. 展開して実際に遊ぶ ===');
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'deepfall-zip-'));
