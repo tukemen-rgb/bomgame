@@ -8,7 +8,9 @@
     "test": "node test/smoke.js",
     "mobile": "node test/mobile.js",
     "audit": "node test/audit.js",
-    "bundle": "node tools/bundle.js"
+    "bundle": "node tools/bundle.js",
+    "pack": "node tools/pack.js",
+    "pack:test": "node test/pack.js"
   },
   "devDependencies": {
     "playwright": "^1.62.0"

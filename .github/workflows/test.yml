@@ -74,12 +74,20 @@ jobs:
           test -s dist/deep-fall.html
           test -s dist/artifact.html
 
+      # 配布用 ZIP。作れることだけでなく、展開したものが実際に遊べるかまで見る。
+      # 「アップロードしたら動かなかった」が一番まずい。
+      - name: 配布用 ZIP の確認
+        run: |
+          npm run pack:test
+          test -s dist/deep-fall.zip
+
       # dist はリポジトリに入っているので、作り直した結果とズレていたら知らせる。
       # ズレたまま公開すると、遊べる版とソースが別物になる。
+      # ZIP も時刻を埋め込んでいないので、中身が同じなら同じバイト列になる。
       - name: 同梱版がソースと一致しているか
         run: |
           if ! git diff --quiet -- dist; then
-            echo '::error::dist/ がソースと一致しません。node tools/bundle.js を実行して commit してください'
+            echo '::error::dist/ がソースと一致しません。node tools/pack.js を実行して commit してください'
             git diff --stat -- dist
             exit 1
           fi
